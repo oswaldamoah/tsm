@@ -99,15 +99,16 @@ document.addEventListener('DOMContentLoaded', function() {
         populatePredefinedSelects();
     }
 
-    // Load sites from localStorage
-    function loadSites() {
-        const savedSites = localStorage.getItem('telecom-sites');
-        sites = savedSites ? JSON.parse(savedSites) : [];
-    }
-
-    // Save sites to localStorage
-    function saveSites() {
-        localStorage.setItem('telecom-sites', JSON.stringify(sites));
+    // Load sites from render
+    async function loadSites() {
+        try {
+            const response = await fetch('https://telecom-site-backend.onrender.com/sites');
+            if (!response.ok) throw new Error("Failed to fetch sites");
+            sites = await response.json();
+        } catch (error) {
+            console.error("Error loading sites:", error);
+            sites = [];
+        }
     }
 
     // Populate predefined selects
@@ -677,126 +678,220 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Add site
-    function addSite(name) {
+    async function addSite(name) {
         const newSite = {
-            id: generateId(),
-            name,
-            materials: [],
-            activities: [],
+            name: name,
             laborCost: 0,
-            operationalCost: 0
+            operationalCost: 0,
+            materials: [],
+            activities: []
         };
-
-        sites.push(newSite);
-        saveSites();
-        renderSites();
+    
+        try {
+            const res = await fetch('https://telecom-site-backend.onrender.com/sites', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newSite)
+            });
+    
+            if (!res.ok) throw new Error('Failed to add site');
+            const createdSite = await res.json();
+            sites.push(createdSite);
+            renderSites();
+        } catch (err) {
+            console.error("Failed to add site:", err);
+        }
     }
+    
 
     // Update site name
-    function updateSiteName(name) {
-        const siteIndex = sites.findIndex(site => site.id === currentSiteId);
-        if (siteIndex === -1) return;
-
-        sites[siteIndex].name = name;
-        saveSites();
-        
-        // Update UI
-        siteTitle.textContent = name;
+    async function updateSite(site) {
+        try {
+            const res = await fetch(`https://telecom-site-backend.onrender.com/sites/${site.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(site)
+            });
+    
+            if (!res.ok) throw new Error('Update failed');
+            const updated = await res.json();
+            const i = sites.findIndex(s => s.id === updated.id);
+            sites[i] = updated;
+            renderSites();
+        } catch (err) {
+            console.error("Update failed:", err);
+        }
     }
-
+    
     // Delete site
-    function deleteSite() {
-        sites = sites.filter(site => site.id !== currentSiteId);
-        saveSites();
-        closeAllModals();
-        showDashboard();
-        renderSites();
+    async function deleteSite() {
+        try {
+            await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}`, {
+                method: 'DELETE'
+            });
+            sites = sites.filter(site => site.id !== currentSiteId);
+            closeAllModals();
+            showDashboard();
+            renderSites();
+        } catch (err) {
+            console.error("Error deleting site:", err);
+        }
     }
+    
 
     // Add material
-    function addMaterial(material) {
+    async function addMaterial(material) {
         const siteIndex = sites.findIndex(site => site.id === currentSiteId);
         if (siteIndex === -1) return;
-
-        sites[siteIndex].materials.push(material);
-        saveSites();
-        
-        // Update UI
-        renderMaterials(sites[siteIndex]);
-        updateCostDisplay(sites[siteIndex]);
-        updateSiteMeta(sites[siteIndex]);
+    
+        try {
+            const response = await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}/materials`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(material)
+            });
+    
+            if (!response.ok) throw new Error("Failed to add material");
+    
+            const newMaterial = await response.json();
+            sites[siteIndex].materials.push(newMaterial);
+    
+            renderMaterials(sites[siteIndex]);
+            updateCostDisplay(sites[siteIndex]);
+            updateSiteMeta(sites[siteIndex]);
+    
+        } catch (error) {
+            console.error("Error adding material:", error);
+        }
     }
+    
 
     // Remove material
-    function removeMaterial(materialId) {
+    async function removeMaterial(materialId) {
         const siteIndex = sites.findIndex(site => site.id === currentSiteId);
         if (siteIndex === -1) return;
-
-        sites[siteIndex].materials = sites[siteIndex].materials.filter(m => m.id !== materialId);
-        saveSites();
-
-        // Update UI
-        renderMaterials(sites[siteIndex]);
-        updateCostDisplay(sites[siteIndex]);
-        updateSiteMeta(sites[siteIndex]);
+    
+        try {
+            await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}/materials/${materialId}`, {
+                method: 'DELETE'
+            });
+    
+            sites[siteIndex].materials = sites[siteIndex].materials.filter(m => m.id !== materialId);
+    
+            renderMaterials(sites[siteIndex]);
+            updateCostDisplay(sites[siteIndex]);
+            updateSiteMeta(sites[siteIndex]);
+    
+        } catch (error) {
+            console.error("Error removing material:", error);
+        }
     }
+    
 
     // Add activity
-    function addActivity(activity) {
+    async function addActivity(activity) {
         const siteIndex = sites.findIndex(site => site.id === currentSiteId);
         if (siteIndex === -1) return;
-
-        sites[siteIndex].activities.push(activity);
-        saveSites();
-        
-        // Update UI
-        renderActivities(sites[siteIndex]);
-        updateSiteMeta(sites[siteIndex]);
+    
+        try {
+            const response = await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}/activities`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(activity)
+            });
+    
+            if (!response.ok) throw new Error("Failed to add activity");
+    
+            const newActivity = await response.json();
+            sites[siteIndex].activities.push(newActivity);
+    
+            renderActivities(sites[siteIndex]);
+            updateSiteMeta(sites[siteIndex]);
+    
+        } catch (error) {
+            console.error("Error adding activity:", error);
+        }
     }
+    
 
     // Remove activity
-    function removeActivity(activityId) {
+    async function removeActivity(activityId) {
         const siteIndex = sites.findIndex(site => site.id === currentSiteId);
         if (siteIndex === -1) return;
-
-        sites[siteIndex].activities = sites[siteIndex].activities.filter(a => a.id !== activityId);
-        saveSites();
-
-        // Update UI
-        renderActivities(sites[siteIndex]);
-        updateSiteMeta(sites[siteIndex]);
+    
+        try {
+            await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}/activities/${activityId}`, {
+                method: 'DELETE'
+            });
+    
+            sites[siteIndex].activities = sites[siteIndex].activities.filter(a => a.id !== activityId);
+    
+            renderActivities(sites[siteIndex]);
+            updateSiteMeta(sites[siteIndex]);
+    
+        } catch (error) {
+            console.error("Error removing activity:", error);
+        }
     }
+    
 
     // Toggle activity completion
-    function toggleActivity(activityId) {
+    async function toggleActivity(activityId) {
         const siteIndex = sites.findIndex(site => site.id === currentSiteId);
         if (siteIndex === -1) return;
-
-        sites[siteIndex].activities = sites[siteIndex].activities.map(activity => {
-            if (activity.id === activityId) {
-                return { ...activity, completed: !activity.completed };
-            }
-            return activity;
-        });
-        saveSites();
-
-        // Update UI
-        renderActivities(sites[siteIndex]);
-        updateSiteMeta(sites[siteIndex]);
+    
+        const activity = sites[siteIndex].activities.find(a => a.id === activityId);
+        if (!activity) return;
+    
+        const updatedActivity = { ...activity, completed: !activity.completed };
+    
+        try {
+            const response = await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}/activities/${activityId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ completed: updatedActivity.completed })
+            });
+    
+            if (!response.ok) throw new Error("Failed to toggle activity");
+    
+            activity.completed = updatedActivity.completed;
+    
+            renderActivities(sites[siteIndex]);
+            updateSiteMeta(sites[siteIndex]);
+    
+        } catch (error) {
+            console.error("Error toggling activity:", error);
+        }
     }
+    
 
     // Update costs
-    function updateCosts() {
+    async function updateCosts() {
         const siteIndex = sites.findIndex(site => site.id === currentSiteId);
         if (siteIndex === -1) return;
-
-        sites[siteIndex].laborCost = parseFloat(laborCostInput.value) || 0;
-        sites[siteIndex].operationalCost = parseFloat(operationalCostInput.value) || 0;
-        saveSites();
-
-        // Update UI
-        updateCostDisplay(sites[siteIndex]);
+    
+        const laborCost = parseFloat(laborCostInput.value) || 0;
+        const operationalCost = parseFloat(operationalCostInput.value) || 0;
+    
+        try {
+            const response = await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ laborCost, operationalCost })
+            });
+    
+            if (!response.ok) throw new Error("Failed to update costs");
+    
+            sites[siteIndex].laborCost = laborCost;
+            sites[siteIndex].operationalCost = operationalCost;
+    
+            updateCostDisplay(sites[siteIndex]);
+    
+        } catch (error) {
+            console.error("Error updating costs:", error);
+        }
     }
+    
 
     // Update site meta information
     function updateSiteMeta(site) {

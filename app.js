@@ -1008,6 +1008,26 @@ async function updateCosts() {
     }
 }
 
+
+
+// ✅ Updated editSiteName() to refresh UI after updating name
+async function editSiteName(siteId, newName) {
+    try {
+        const res = await fetch(`https://telecom-site-backend.onrender.com/sites/${siteId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: newName })
+        });
+
+        if (!res.ok) throw new Error("Failed to update name");
+
+        await fetchSitesAndRender();  // 🔄 Refresh UI after success
+
+    } catch (err) {
+        console.error("❌ Error updating site name:", err.message || err);
+    }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     console.log("🧠 init() is running");
     init();  // Now async-safe

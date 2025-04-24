@@ -997,3 +997,5 @@ console.log("✅ app.js loaded");
     console.log("🧠 init() is running");
     init();  // Now async-safe
 });
+
+};

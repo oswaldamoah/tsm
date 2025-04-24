@@ -570,9 +570,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (siteForm.dataset.mode === 'add') {
             addSite(siteName);
-        } else {
-            updateSiteName(siteName);
-        }
+       } else if (siteForm.dataset.mode === 'edit') {
+    const siteIndex = sites.findIndex(site => site.id === currentSiteId);
+    if (siteIndex === -1) return;
+
+    const updatedSite = {
+        ...sites[siteIndex],
+        name: siteName
+    };
+
+    updateSite(updatedSite);
+}
+
 
         closeAllModals();
     }

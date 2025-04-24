@@ -2,7 +2,6 @@ console.log("✅ app.js loaded");
 
 
 // Main application logic
-
     // State management
     let sites = [];
     let currentSiteId = null;
@@ -999,4 +998,4 @@ console.log("✅ app.js loaded");
     init();  // Now async-safe
 });
 
-);
+;

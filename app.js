@@ -1,3 +1,6 @@
+console.log("✅ app.js loaded");
+
+
 // Main application logic
 document.addEventListener('DOMContentLoaded', function() {
     // State management

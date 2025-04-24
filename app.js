@@ -105,8 +105,10 @@ document.addEventListener('DOMContentLoaded', function() {
             const response = await fetch('https://telecom-site-backend.onrender.com/sites');
             if (!response.ok) throw new Error("Failed to fetch sites");
             sites = await response.json();
-        } catch (error) {
-            console.error("Error loading sites:", error);
+        }catch (error) {
+  console.error("Something went wrong:", error.message || error);
+}
+
             sites = [];
         }
     }

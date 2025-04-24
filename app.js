@@ -141,6 +141,8 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log("👂 setupEventListeners() ran");
 
         // Dashboard
+        console.log("🔎 addSiteBtn is:", addSiteBtn);
+
         addSiteBtn.addEventListener('click', () => {
           console.log("🟢 'Add Site' button clicked");
           openAddSiteModal();

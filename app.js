@@ -697,7 +697,9 @@ document.addEventListener('DOMContentLoaded', function() {
             materials: [],
             activities: []
         };
-    
+
+        console.log("📡 Sending POST to /sites with data:", newSite);
+        
         try {
             const res = await fetch('https://telecom-site-backend.onrender.com/sites', {
                 method: 'POST',

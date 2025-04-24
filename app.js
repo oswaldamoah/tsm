@@ -2,7 +2,6 @@ console.log("✅ app.js loaded");
 
 
 // Main application logic
-document.addEventListener('DOMContentLoaded', function() {
     // State management
     let sites = [];
     let currentSiteId = null;
@@ -100,7 +99,7 @@ document.addEventListener('DOMContentLoaded', function() {
     renderSites();           // Then render them
     setupEventListeners();
     populatePredefinedSelects();
-}
+
 
     // Load sites from render
     async function loadSites() {

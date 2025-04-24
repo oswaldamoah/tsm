@@ -92,12 +92,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Initialize the application
-    function init() {
-        loadSites();
-        renderSites();
-        setupEventListeners();
-        populatePredefinedSelects();
-    }
+   async function init() {
+    await loadSites();       // Wait for sites to be loaded
+    renderSites();           // Then render them
+    setupEventListeners();
+    populatePredefinedSelects();
+}
 
     // Load sites from render
     async function loadSites() {
@@ -954,5 +954,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Initialize the app
-    init();
+   document.addEventListener("DOMContentLoaded", () => {
+    init();  // Now async-safe
+});
+
 });

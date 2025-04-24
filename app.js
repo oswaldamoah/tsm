@@ -138,7 +138,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Setup event listeners
     function setupEventListeners() {
         // Dashboard
-        addSiteBtn.addEventListener('click', openAddSiteModal);
+        addSiteBtn.addEventListener('click', () => {
+          console.log("🟢 'Add Site' button clicked");
+          openAddSiteModal();
+        });
+
         emptyAddSiteBtn.addEventListener('click', openAddSiteModal);
         searchInput.addEventListener('input', handleSearch);
         exportBtn.addEventListener('click', exportData);

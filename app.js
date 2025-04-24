@@ -847,7 +847,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
         try {
             const response = await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}/activities/${activityId}`, {
-                method: 'PUT',
+                method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ completed: updatedActivity.completed })
             });

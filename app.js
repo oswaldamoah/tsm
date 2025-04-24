@@ -971,7 +971,44 @@ console.log("✅ app.js loaded");
     }
 
     // Initialize the app
-   document.addEventListener("DOMContentLoaded", () => {
+   
+
+// 🔁 Refresh the site list from the backend and re-render
+async function fetchSitesAndRender() {
+    try {
+        sites = await loadSites();
+        renderSites();
+        console.log("🔄 Sites reloaded and re-rendered");
+    } catch (err) {
+        console.error("❌ Failed to reload sites:", err.message || err);
+    }
+}
+
+// ✅ Updated updateCosts to re-fetch and re-render after saving
+async function updateCosts() {
+    const siteIndex = sites.findIndex(site => site.id === currentSiteId);
+    if (siteIndex === -1) return;
+
+    const laborCost = parseFloat(laborCostInput.value) || 0;
+    const operationalCost = parseFloat(operationalCostInput.value) || 0;
+
+    try {
+        const response = await fetch(`https://telecom-site-backend.onrender.com/sites/${currentSiteId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ laborCost, operationalCost })
+        });
+
+        if (!response.ok) throw new Error("Failed to update costs");
+
+        await fetchSitesAndRender(); // 🔁 Refresh UI with updated backend data
+
+    } catch (error) {
+        console.error("Error updating costs:", error);
+    }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
     console.log("🧠 init() is running");
     init();  // Now async-safe
 });

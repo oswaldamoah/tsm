@@ -993,6 +993,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize the app
    document.addEventListener("DOMContentLoaded", () => {
+    console.log("🧠 init() is running");
     init();  // Now async-safe
 });
 

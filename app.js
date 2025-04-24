@@ -2,6 +2,7 @@ console.log("✅ app.js loaded");
 
 
 // Main application logic
+
     // State management
     let sites = [];
     let currentSiteId = null;
@@ -99,7 +100,7 @@ console.log("✅ app.js loaded");
     renderSites();           // Then render them
     setupEventListeners();
     populatePredefinedSelects();
-
+}
 
     // Load sites from render
     async function loadSites() {
@@ -998,4 +999,4 @@ console.log("✅ app.js loaded");
     init();  // Now async-safe
 });
 
-};
+);

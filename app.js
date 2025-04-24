@@ -106,12 +106,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok) throw new Error("Failed to fetch sites");
             sites = await response.json();
         }catch (error) {
-  console.error("Something went wrong:", error.message || error);
-}
-
-            sites = [];
+            console.error("Something went wrong:", error.message || error);
+            }
+        sites = [];
         }
-    }
 
     // Populate predefined selects
     function populatePredefinedSelects() {

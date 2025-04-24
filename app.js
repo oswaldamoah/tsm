@@ -105,10 +105,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const response = await fetch('https://telecom-site-backend.onrender.com/sites');
             if (!response.ok) throw new Error("Failed to fetch sites");
             sites = await response.json();
-        } catch (error) {
-            console.error("Error loading sites:", error);
-            sites = [];
-        }
+        } catch (err) {
+  console.error("🔥 Failed to load site:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
 
     // Populate predefined selects
@@ -708,8 +710,11 @@ document.addEventListener('DOMContentLoaded', function() {
             sites.push(createdSite);
             renderSites();
         } catch (err) {
-            console.error("Failed to add site:", err);
-        }
+  console.error("🔥 Failed to add site:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
     
 
@@ -728,8 +733,11 @@ document.addEventListener('DOMContentLoaded', function() {
             sites[i] = updated;
             renderSites();
         } catch (err) {
-            console.error("Update failed:", err);
-        }
+  console.error("🔥 Failed to update site:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
     
     // Delete site
@@ -743,8 +751,11 @@ document.addEventListener('DOMContentLoaded', function() {
             showDashboard();
             renderSites();
         } catch (err) {
-            console.error("Error deleting site:", err);
-        }
+  console.error("🔥 Failed to delete site:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
     
 
@@ -769,9 +780,12 @@ document.addEventListener('DOMContentLoaded', function() {
             updateCostDisplay(sites[siteIndex]);
             updateSiteMeta(sites[siteIndex]);
     
-        } catch (error) {
-            console.error("Error adding material:", error);
-        }
+        } catch (err) {
+  console.error("🔥 Failed to add material:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
     
 
@@ -791,9 +805,12 @@ document.addEventListener('DOMContentLoaded', function() {
             updateCostDisplay(sites[siteIndex]);
             updateSiteMeta(sites[siteIndex]);
     
-        } catch (error) {
-            console.error("Error removing material:", error);
-        }
+        } catch (err) {
+  console.error("🔥 Failed to remove material:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
     
 
@@ -817,9 +834,12 @@ document.addEventListener('DOMContentLoaded', function() {
             renderActivities(sites[siteIndex]);
             updateSiteMeta(sites[siteIndex]);
     
-        } catch (error) {
-            console.error("Error adding activity:", error);
-        }
+        } catch (err) {
+  console.error("🔥 Failed to add activity:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
     
 
@@ -838,9 +858,12 @@ document.addEventListener('DOMContentLoaded', function() {
             renderActivities(sites[siteIndex]);
             updateSiteMeta(sites[siteIndex]);
     
-        } catch (error) {
-            console.error("Error removing activity:", error);
-        }
+        } catch (err) {
+  console.error("🔥 Failed to remove activity:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
     
 
@@ -868,9 +891,12 @@ document.addEventListener('DOMContentLoaded', function() {
             renderActivities(sites[siteIndex]);
             updateSiteMeta(sites[siteIndex]);
     
-        } catch (error) {
-            console.error("Error toggling activity:", error);
-        }
+        } catch (err) {
+  console.error("🔥 Failed to toggle activity:");
+  console.error("🧠 Message:", err.message);
+  console.error("📦 Full error:", err);
+}
+
     }
     
 

@@ -8,28 +8,6 @@ console.log("✅ app.js loaded");
     let activeMaterialTab = 'predefined-material';
     let activeActivityTab = 'predefined-activity';
 
-    // Define predefined materials and activities (replace with actual data or import)
-    const predefinedMaterials = [
-        { id: 'material-1', name: 'patch cord' },
-        { id: 'material-2', name: 'Optical fiber cable' },
-        { id: "material-3", name: "closure" },
-        { id: "material-4", name: "steel band" },
-        { id: "material-5", name: "Optical Distribution Frame" },
-    ];
-
-    const predefinedActivities = [
-        { id: 'activity-1', name: 'Planting of pole' },
-        { id: 'activity-2', name: 'Transportation of pole' },
-        { id: 'activity-3', name: 'Fixing of poles accessories on existing poles' },
-        { id: 'activity-4', name: 'Stringing  of  overhead optical fibre cable' },
-        { id: 'activity-5', name: 'Fibre cable running' },
-        { id: 'activity-6', name: 'Splicing and Installation of 48 core into splicing closure' },
-        { id: 'activity-7', name: 'Stringing  of  overhead optical fibre cable' },
-        { id: 'activity-8', name: 'Fiber Distribution Panel' },
-        { id: 'activity-9', name: 'Testing and Commissioning' },
-        { id: 'activity-10', name: 'As Built drawings' },
-    ];
-
     // DOM Elements - Dashboard
     const dashboardView = document.getElementById('dashboard-view');
     const siteDetailsView = document.getElementById('site-details-view');

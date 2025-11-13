@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -28,184 +27,183 @@
         </div>
     </header>
 
-```
-<main class="container">
-    <!-- Dashboard View -->
-    <div id="dashboard-view" class="view">
-        <div class="dashboard-header">
-            <h2 class="section-title">Sites</h2>
-            <div class="dashboard-actions">
-                <div class="search-container">
-                    <i class="fas fa-search search-icon"></i>
-                    <input type="text" id="search-input" class="search-input" placeholder="Search sites...">
+    <main class="container">
+        <!-- Dashboard View -->
+        <div id="dashboard-view" class="view">
+            <div class="dashboard-header">
+                <h2 class="section-title">Sites</h2>
+                <div class="dashboard-actions">
+                    <div class="search-container">
+                        <i class="fas fa-search search-icon"></i>
+                        <input type="text" id="search-input" class="search-input" placeholder="Search sites...">
+                    </div>
+                    <button id="add-site-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        <span class="btn-text">Add Site</span>
+                    </button>
                 </div>
-                <button id="add-site-btn" class="btn btn-primary">
-                    <i class="fas fa-plus"></i>
-                    <span class="btn-text">Add Site</span>
+            </div>
+
+            <div id="sites-container" class="sites-grid">
+                <!-- Sites will be dynamically added here -->
+                <div id="empty-state" class="empty-state">
+                    <div class="empty-state-icon">
+                        <i class="fas fa-search"></i>
+                    </div>
+                    <h3 class="empty-state-title">No sites found</h3>
+                    <p class="empty-state-text">Get started by adding your first site</p>
+                    <button id="empty-add-site-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        <span>Add Site</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Site Details View -->
+        <div id="site-details-view" class="view hidden">
+            <div class="site-details-header">
+                <button id="back-btn" class="btn btn-icon">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <div class="site-info">
+                    <div class="site-title-container">
+                        <h2 id="site-title" class="site-title">Site Name</h2>
+                        <button id="edit-site-btn" class="btn btn-icon">
+                            <i class="fas fa-pencil-alt"></i>
+                        </button>
+                    </div>
+                    <div id="site-meta" class="site-meta">
+                        <!-- Site meta information will be added here -->
+                    </div>
+                </div>
+                <button id="delete-site-btn" class="btn btn-danger">
+                    <i class="fas fa-trash"></i>
+                    <span class="btn-text">Delete Site</span>
                 </button>
             </div>
-        </div>
 
-        <div id="sites-container" class="sites-grid">
-            <!-- Sites will be dynamically added here -->
-            <div id="empty-state" class="empty-state">
-                <div class="empty-state-icon">
-                    <i class="fas fa-search"></i>
-                </div>
-                <h3 class="empty-state-title">No sites found</h3>
-                <p class="empty-state-text">Get started by adding your first site</p>
-                <button id="empty-add-site-btn" class="btn btn-primary">
-                    <i class="fas fa-plus"></i>
-                    <span>Add Site</span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Site Details View -->
-    <div id="site-details-view" class="view hidden">
-        <div class="site-details-header">
-            <button id="back-btn" class="btn btn-icon">
-                <i class="fas fa-arrow-left"></i>
-            </button>
-            <div class="site-info">
-                <div class="site-title-container">
-                    <h2 id="site-title" class="site-title">Site Name</h2>
-                    <button id="edit-site-btn" class="btn btn-icon">
-                        <i class="fas fa-pencil-alt"></i>
-                    </button>
-                </div>
-                <div id="site-meta" class="site-meta">
-                    <!-- Site meta information will be added here -->
-                </div>
-            </div>
-            <button id="delete-site-btn" class="btn btn-danger">
-                <i class="fas fa-trash"></i>
-                <span class="btn-text">Delete Site</span>
-            </button>
-        </div>
-
-        <div class="cost-summary-cards">
-            <div class="card cost-card">
-                <div class="card-header">
-                    <h3 class="card-title">Material Cost</h3>
-                </div>
-                <div class="card-content">
-                    <div id="material-cost" class="cost-amount">₵0.00</div>
-                    <p id="material-count" class="cost-meta">0 materials added</p>
-                </div>
-            </div>
-
-            <div class="card cost-card">
-                <div class="card-header">
-                    <h3 class="card-title">Labor & Operational</h3>
-                </div>
-                <div class="card-content">
-                    <div id="labor-operational-cost" class="cost-amount">₵0.00</div>
-                    <p class="cost-meta">Combined costs</p>
-                </div>
-            </div>
-
-            <div class="card cost-card">
-                <div class="card-header">
-                    <h3 class="card-title">Total Cost</h3>
-                </div>
-                <div class="card-content">
-                    <div id="total-cost" class="cost-amount">₵0.00</div>
-                    <p class="cost-meta">All costs combined</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="tabs-container">
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="materials">Materials</button>
-                <button class="tab-btn" data-tab="activities">Activities</button>
-                <button class="tab-btn" data-tab="operational-costs">Operational Costs</button>
-                <button class="tab-btn" data-tab="costs">Costs</button>
-            </div>
-
-            <div id="materials-tab" class="tab-content active">
-                <div class="tab-header">
-                    <h3 class="tab-title">Materials</h3>
-                    <button id="add-material-btn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i>
-                        <span>Add Material</span>
-                    </button>
-                </div>
-                <div id="materials-list" class="list-container">
-                    <!-- Materials will be dynamically added here -->
-                </div>
-            </div>
-
-            <div id="activities-tab" class="tab-content">
-                <div class="tab-header">
-                    <h3 class="tab-title">Activities</h3>
-                    <button id="add-activity-btn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i>
-                        <span>Add Activity</span>
-                    </button>
-                </div>
-                <div id="activities-list" class="list-container">
-                    <!-- Activities will be dynamically added here -->
-                </div>
-            </div>
-
-            <div id="operational-costs-tab" class="tab-content">
-                <div class="tab-header">
-                    <h3 class="tab-title">Operational Costs</h3>
-                    <button id="add-operational-cost-btn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i>
-                        <span>Add Cost</span>
-                    </button>
-                </div>
-                <div id="operational-costs-list" class="list-container">
-                    <!-- Operational costs will be dynamically added here -->
-                </div>
-            </div>
-
-            <div id="costs-tab" class="tab-content">
-                <h3 class="tab-title">Cost Management</h3>
-                <div class="card">
+            <div class="cost-summary-cards">
+                <div class="card cost-card">
+                    <div class="card-header">
+                        <h3 class="card-title">Material Cost</h3>
+                    </div>
                     <div class="card-content">
-                        <div class="form-group">
-                            <label for="labor-cost-input">Labor Cost (₵)</label>
-                            <input type="number" id="labor-cost-input" class="input" min="0" step="0.01" value="0">
-                        </div>
-
-                        <button id="update-costs-btn" class="btn btn-primary">Update Labor Cost</button>
+                        <div id="material-cost" class="cost-amount">₵0.00</div>
+                        <p id="material-count" class="cost-meta">0 materials added</p>
                     </div>
                 </div>
 
-                <h3 class="tab-title mt-4">Cost Summary</h3>
-                <div class="card">
+                <div class="card cost-card">
+                    <div class="card-header">
+                        <h3 class="card-title">Labor & Operational</h3>
+                    </div>
                     <div class="card-content">
-                        <div class="cost-summary">
-                            <div class="cost-row">
-                                <span class="cost-label">Materials Cost:</span>
-                                <span id="summary-material-cost" class="cost-value">₵0.00</span>
+                        <div id="labor-operational-cost" class="cost-amount">₵0.00</div>
+                        <p class="cost-meta">Combined costs</p>
+                    </div>
+                </div>
+
+                <div class="card cost-card">
+                    <div class="card-header">
+                        <h3 class="card-title">Total Cost</h3>
+                    </div>
+                    <div class="card-content">
+                        <div id="total-cost" class="cost-amount">₵0.00</div>
+                        <p class="cost-meta">All costs combined</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tabs-container">
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="materials">Materials</button>
+                    <button class="tab-btn" data-tab="activities">Activities</button>
+                    <button class="tab-btn" data-tab="operational-costs">Operational Costs</button>
+                    <button class="tab-btn" data-tab="costs">Costs</button>
+                </div>
+
+                <div id="materials-tab" class="tab-content active">
+                    <div class="tab-header">
+                        <h3 class="tab-title">Materials</h3>
+                        <button id="add-material-btn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            <span>Add Material</span>
+                        </button>
+                    </div>
+                    <div id="materials-list" class="list-container">
+                        <!-- Materials will be dynamically added here -->
+                    </div>
+                </div>
+
+                <div id="activities-tab" class="tab-content">
+                    <div class="tab-header">
+                        <h3 class="tab-title">Activities</h3>
+                        <button id="add-activity-btn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            <span>Add Activity</span>
+                        </button>
+                    </div>
+                    <div id="activities-list" class="list-container">
+                        <!-- Activities will be dynamically added here -->
+                    </div>
+                </div>
+
+                <div id="operational-costs-tab" class="tab-content">
+                    <div class="tab-header">
+                        <h3 class="tab-title">Operational Costs</h3>
+                        <button id="add-operational-cost-btn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            <span>Add Cost</span>
+                        </button>
+                    </div>
+                    <div id="operational-costs-list" class="list-container">
+                        <!-- Operational costs will be dynamically added here -->
+                    </div>
+                </div>
+
+                <div id="costs-tab" class="tab-content">
+                    <h3 class="tab-title">Cost Management</h3>
+                    <div class="card">
+                        <div class="card-content">
+                            <div class="form-group">
+                                <label for="labor-cost-input">Labor Cost (₵)</label>
+                                <input type="number" id="labor-cost-input" class="input" min="0" step="0.01" value="0">
                             </div>
-                            <div class="cost-row">
-                                <span class="cost-label">Labor Cost:</span>
-                                <span id="summary-labor-cost" class="cost-value">₵0.00</span>
-                            </div>
-                            <div class="cost-row">
-                                <span class="cost-label">Operational Cost:</span>
-                                <span id="summary-operational-cost" class="cost-value">₵0.00</span>
-                            </div>
-                            <div class="cost-row total">
-                                <span class="cost-label">Total Cost:</span>
-                                <span id="summary-total-cost" class="cost-value">₵0.00</span>
+
+                            <button id="update-costs-btn" class="btn btn-primary">Update Labor Cost</button>
+                        </div>
+                    </div>
+
+                    <h3 class="tab-title mt-4">Cost Summary</h3>
+                    <div class="card">
+                        <div class="card-content">
+                            <div class="cost-summary">
+                                <div class="cost-row">
+                                    <span class="cost-label">Materials Cost:</span>
+                                    <span id="summary-material-cost" class="cost-value">₵0.00</span>
+                                </div>
+                                <div class="cost-row">
+                                    <span class="cost-label">Labor Cost:</span>
+                                    <span id="summary-labor-cost" class="cost-value">₵0.00</span>
+                                </div>
+                                <div class="cost-row">
+                                    <span class="cost-label">Operational Cost:</span>
+                                    <span id="summary-operational-cost" class="cost-value">₵0.00</span>
+                                </div>
+                                <div class="cost-row total">
+                                    <span class="cost-label">Total Cost:</span>
+                                    <span id="summary-total-cost" class="cost-value">₵0.00</span>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-</main>
+    </main>
 
- <!-- Modals -->
+    <!-- Modals -->
     <div id="site-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -355,7 +353,8 @@
             </form>
         </div>
     </div>
-   <!-- Confirmation Modal -->
+
+    <!-- Confirmation Modal -->
     <div id="confirm-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -372,9 +371,7 @@
         </div>
     </div>
 
-<script src="/data.js"></script>
-<script src="/app.js"></script>
-```
-
+    <script src="/data.js"></script>
+    <script src="/app.js"></script>
 </body>
 </html>

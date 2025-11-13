@@ -120,6 +120,8 @@
                     <button class="tab-btn active" data-tab="materials">Materials</button>
                     <button class="tab-btn" data-tab="activities">Activities</button>
                     <button class="tab-btn" data-tab="costs">Costs</button>
+                    <!-- Added Operational Costs tab button -->
+                    <button class="tab-btn" data-tab="operational-costs">Operational Costs</button>
                 </div>
 
                 <div id="materials-tab" class="tab-content active">
@@ -148,40 +150,53 @@
                     </div>
                 </div>
 
-<div id="costs-tab" class="tab-content">
-    <h3 class="tab-title">Cost Management</h3>
-    <div class="card">
-        <div class="card-content">
-            <div class="form-group">
-                <label for="labor-cost-input">Labor Cost (₵)</label>
-                <input type="number" id="labor-cost-input" class="input" min="0" step="0.01" value="0">
-            </div>
+                <div id="costs-tab" class="tab-content">
+                    <h3 class="tab-title">Cost Management</h3>
+                    <div class="card">
+                        <div class="card-content">
+                            <div class="form-group">
+                                <label for="labor-cost-input">Labor Cost (₵)</label>
+                                <input type="number" id="labor-cost-input" class="input" min="0" step="0.01" value="0">
+                            </div>
 
-            <button id="update-costs-btn" class="btn btn-primary">Update Labor Cost</button>
-        </div>
-    </div>
+                            <button id="update-costs-btn" class="btn btn-primary">Update Labor Cost</button>
+                        </div>
+                    </div>
 
-    <h3 class="tab-title mt-4">Cost Summary</h3>
-    <div class="card">
-        <div class="card-content">
-            <div class="cost-summary">
-                <div class="cost-row">
-                    <span class="cost-label">Materials Cost:</span>
-                    <span id="summary-material-cost" class="cost-value">₵0.00</span>
+                    <h3 class="tab-title mt-4">Cost Summary</h3>
+                    <div class="card">
+                        <div class="card-content">
+                            <div class="cost-summary">
+                                <div class="cost-row">
+                                    <span class="cost-label">Materials Cost:</span>
+                                    <span id="summary-material-cost" class="cost-value">₵0.00</span>
+                                </div>
+                                <div class="cost-row">
+                                    <span class="cost-label">Labor Cost:</span>
+                                    <span id="summary-labor-cost" class="cost-value">₵0.00</span>
+                                </div>
+                                <div class="cost-row total">
+                                    <span class="cost-label">Total Cost:</span>
+                                    <span id="summary-total-cost" class="cost-value">₵0.00</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="cost-row">
-                    <span class="cost-label">Labor Cost:</span>
-                    <span id="summary-labor-cost" class="cost-value">₵0.00</span>
-                </div>
-                <div class="cost-row total">
-                    <span class="cost-label">Total Cost:</span>
-                    <span id="summary-total-cost" class="cost-value">₵0.00</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
+                <!-- Added Operational Costs tab content -->
+                <div id="operational-costs-tab" class="tab-content">
+                    <div class="tab-header">
+                        <h3 class="tab-title">Operational Costs</h3>
+                        <button id="add-operational-cost-btn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            <span>Add Cost</span>
+                        </button>
+                    </div>
+                    <div id="operational-costs-list" class="list-container">
+                        <!-- Operational costs will be dynamically added here -->
+                    </div>
+                </div>
             </div>
         </div>
     </main>
@@ -306,6 +321,32 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline modal-cancel">Cancel</button>
                     <button type="submit" class="btn btn-primary">Add Activity</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Added Operational Cost modal -->
+    <div id="operational-cost-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Operational Cost</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <form id="operational-cost-form" class="modal-form">
+                <div class="form-group">
+                    <label for="operational-cost-name-input">Cost Name</label>
+                    <input type="text" id="operational-cost-name-input" class="input" placeholder="e.g., Transport, Tools">
+                    <p id="operational-cost-name-error" class="input-error hidden">Cost name is required</p>
+                </div>
+                <div class="form-group">
+                    <label for="operational-cost-amount-input">Amount (₵)</label>
+                    <input type="number" id="operational-cost-amount-input" class="input" min="0" step="0.01" value="0">
+                    <p id="operational-cost-amount-error" class="input-error hidden">Amount must be a valid number</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline modal-cancel">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Cost</button>
                 </div>
             </form>
         </div>

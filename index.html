@@ -119,9 +119,8 @@
                 <div class="tabs">
                     <button class="tab-btn active" data-tab="materials">Materials</button>
                     <button class="tab-btn" data-tab="activities">Activities</button>
-                    <button class="tab-btn" data-tab="costs">Costs</button>
-                    <!-- Added Operational Costs tab button -->
                     <button class="tab-btn" data-tab="operational-costs">Operational Costs</button>
+                    <button class="tab-btn" data-tab="costs">Costs</button>
                 </div>
 
                 <div id="materials-tab" class="tab-content active">
@@ -150,6 +149,19 @@
                     </div>
                 </div>
 
+                <div id="operational-costs-tab" class="tab-content">
+                    <div class="tab-header">
+                        <h3 class="tab-title">Operational Costs</h3>
+                        <button id="add-operational-cost-btn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            <span>Add Cost</span>
+                        </button>
+                    </div>
+                    <div id="operational-costs-list" class="list-container">
+                        <!-- Operational costs will be dynamically added here -->
+                    </div>
+                </div>
+
                 <div id="costs-tab" class="tab-content">
                     <h3 class="tab-title">Cost Management</h3>
                     <div class="card">
@@ -175,26 +187,16 @@
                                     <span class="cost-label">Labor Cost:</span>
                                     <span id="summary-labor-cost" class="cost-value">₵0.00</span>
                                 </div>
+                                <div class="cost-row">
+                                    <span class="cost-label">Operational Cost:</span>
+                                    <span id="summary-operational-cost" class="cost-value">₵0.00</span>
+                                </div>
                                 <div class="cost-row total">
                                     <span class="cost-label">Total Cost:</span>
                                     <span id="summary-total-cost" class="cost-value">₵0.00</span>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <!-- Added Operational Costs tab content -->
-                <div id="operational-costs-tab" class="tab-content">
-                    <div class="tab-header">
-                        <h3 class="tab-title">Operational Costs</h3>
-                        <button id="add-operational-cost-btn" class="btn btn-primary">
-                            <i class="fas fa-plus"></i>
-                            <span>Add Cost</span>
-                        </button>
-                    </div>
-                    <div id="operational-costs-list" class="list-container">
-                        <!-- Operational costs will be dynamically added here -->
                     </div>
                 </div>
             </div>

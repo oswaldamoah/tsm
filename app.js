@@ -1093,13 +1093,3 @@ document.addEventListener("DOMContentLoaded", () => {
   init()
 })
 
-// Data from data.js
-const predefinedMaterials = [
-  { id: "1", name: "Material 1" },
-  { id: "2", name: "Material 2" },
-]
-
-const predefinedActivities = [
-  { id: "1", name: "Activity 1" },
-  { id: "2", name: "Activity 2" },
-]

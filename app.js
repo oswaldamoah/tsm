@@ -1064,8 +1064,9 @@ function calculateProgress(site) {
 
 // Export data as Excel (CSV)
 function exportData() {
-  // Create CSV content
+  // Create CSV content with UTF-8 BOM
   let csvContent =
+    "\uFEFF" +
     "Site Name,Materials Count,Activities Count,Progress,Materials Cost,Labor Cost,Operational Costs Total,Total Cost\n"
 
   sites.forEach((site) => {
@@ -1080,10 +1081,13 @@ function exportData() {
     csvContent += `${safeSiteName},${site.materials.length},${site.activities.length},${progress}%,₵${materialCost.toFixed(2)},₵${site.laborCost.toFixed(2)},₵${operationalCostTotal.toFixed(2)},₵${totalCost.toFixed(2)}\n`
   })
 
+  // Create a Blob with UTF-8 encoding
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+  const url = URL.createObjectURL(blob)
+  
   // Create a download link
-  const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent)
   const link = document.createElement("a")
-  link.setAttribute("href", encodedUri)
+  link.setAttribute("href", url)
   link.setAttribute("download", "telecom_sites_data.csv")
   document.body.appendChild(link)
 
@@ -1092,6 +1096,9 @@ function exportData() {
 
   // Remove the link from the document
   document.body.removeChild(link)
+  
+  // Clean up the URL object
+  URL.revokeObjectURL(url)
 }
 
 document.addEventListener("DOMContentLoaded", () => {

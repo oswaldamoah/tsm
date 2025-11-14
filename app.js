@@ -37,10 +37,8 @@ const laborCostInput = document.getElementById("labor-cost-input")
 const updateCostsBtn = document.getElementById("update-costs-btn")
 const summaryMaterialCost = document.getElementById("summary-material-cost")
 const summaryLaborCost = document.getElementById("summary-labor-cost")
+const summaryOperationalCost = document.getElementById("summary-operational-cost")
 const summaryTotalCost = document.getElementById("summary-total-cost")
-
-const addOperationalCostBtn = document.getElementById("add-operational-cost-btn")
-const operationalCostsList = document.getElementById("operational-costs-list")
 
 // DOM Elements - Modals
 const siteModal = document.getElementById("site-modal")
@@ -140,6 +138,8 @@ function setupEventListeners() {
   addMaterialBtn.addEventListener("click", openAddMaterialModal)
   addActivityBtn.addEventListener("click", openAddActivityModal)
 
+  // Open add operational cost modal
+  const addOperationalCostBtn = document.getElementById("add-operational-cost-btn")
   addOperationalCostBtn.addEventListener("click", openAddOperationalCostModal)
 
   // Confirmation Modal
@@ -325,16 +325,18 @@ function showSiteDetails(siteId) {
 function updateCostDisplay(site) {
   const materialCost = calculateMaterialCost(site)
   const laborCost = site.laborCost
-  const totalCost = materialCost + laborCost
+  const operationalCostTotal = calculateOperationalCostTotal(site)
+  const totalCost = materialCost + laborCost + operationalCostTotal
 
   materialCostEl.textContent = `₵${materialCost.toFixed(2)}`
   materialCountEl.textContent = `${site.materials.length} materials added`
-  laborOperationalCostEl.textContent = `₵${laborCost.toFixed(2)}`
+  laborOperationalCostEl.textContent = `₵${(laborCost + operationalCostTotal).toFixed(2)}`
   totalCostEl.textContent = `₵${totalCost.toFixed(2)}`
 
   // Update summary
   summaryMaterialCost.textContent = `₵${materialCost.toFixed(2)}`
   summaryLaborCost.textContent = `₵${laborCost.toFixed(2)}`
+  summaryOperationalCost.textContent = `₵${operationalCostTotal.toFixed(2)}`
   summaryTotalCost.textContent = `₵${totalCost.toFixed(2)}`
 }
 
@@ -430,6 +432,7 @@ function renderActivities(site) {
 }
 
 function renderOperationalCosts(site) {
+  const operationalCostsList = document.getElementById("operational-costs-list")
   operationalCostsList.innerHTML = ""
 
   if (!site.operationalCosts || site.operationalCosts.length === 0) {
@@ -769,6 +772,9 @@ async function addSite(name) {
   const newSite = {
     name: name,
     laborCost: 0,
+    materials: [],
+    activities: [],
+    operationalCosts: [],
   }
 
   console.log("📡 Sending POST to /sites with data:", newSite)
@@ -1094,12 +1100,12 @@ document.addEventListener("DOMContentLoaded", () => {
 })
 
 // Data from data.js
-const predefinedMaterials = [
-  { id: "1", name: "Material 1" },
-  { id: "2", name: "Material 2" },
-]
+// const predefinedMaterials = [
+//   { id: "1", name: "Material 1" },
+//   { id: "2", name: "Material 2" },
+// ]
 
-const predefinedActivities = [
-  { id: "1", name: "Activity 1" },
-  { id: "2", name: "Activity 2" },
-]
+// const predefinedActivities = [
+//   { id: "1", name: "Activity 1" },
+//   { id: "2", name: "Activity 2" },
+// ]

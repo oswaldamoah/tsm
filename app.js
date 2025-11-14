@@ -1064,9 +1064,8 @@ function calculateProgress(site) {
 
 // Export data as Excel (CSV)
 function exportData() {
-  // Create CSV content with UTF-8 BOM
+  // Create CSV content
   let csvContent =
-    "\uFEFF" +
     "Site Name,Materials Count,Activities Count,Progress,Materials Cost,Labor Cost,Operational Costs Total,Total Cost\n"
 
   sites.forEach((site) => {

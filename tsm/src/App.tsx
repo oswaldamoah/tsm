@@ -70,6 +70,15 @@ type Site = {
   id: string
   name: string
   laborCost: number
+  siteCode: string
+  siteType: string
+  region: string
+  location: string
+  latitude: number | null
+  longitude: number | null
+  googleMapsUrl: string
+  images: string[]
+  notes: string
   isArchived: boolean
   materials: Material[]
   activities: Activity[]
@@ -113,13 +122,22 @@ type RawSite = {
   _id?: string | number
   name?: unknown
   laborCost?: unknown
+  siteCode?: unknown
+  siteType?: unknown
+  region?: unknown
+  location?: unknown
+  latitude?: unknown
+  longitude?: unknown
+  googleMapsUrl?: unknown
+  images?: unknown
+  notes?: unknown
   isArchived?: unknown
   materials?: RawMaterial[] | null
   activities?: RawActivity[] | null
   operationalCosts?: RawOperationalCost[] | null
 }
 
-type MainTab = 'materials' | 'activities' | 'operational-costs' | 'costs'
+type MainTab = 'about' | 'materials' | 'activities' | 'costs'
 type ModalType = 'site' | 'material' | 'activity' | 'operational-cost' | 'delete-site' | 'company-settings' | null
 type SiteModalMode = 'add' | 'edit'
 type MaterialMode = 'predefined' | 'custom'
@@ -140,10 +158,24 @@ type IconName =
   | 'close'
   | 'download'
   | 'edit'
+  | 'file-text'
+  | 'image'
+  | 'info'
+  | 'map-pin'
   | 'plus'
   | 'search'
   | 'settings'
+  | 'signal'
   | 'trash'
+
+const siteTypeOptions = [
+  { value: '4G', label: '4G' },
+  { value: '5G', label: '5G' },
+  { value: 'Fiber', label: 'Fiber' },
+  { value: 'Microwave', label: 'Microwave' },
+  { value: 'Satellite', label: 'Satellite' },
+  { value: 'Other', label: 'Other' },
+]
 
 const emptyMaterialForm = {
   materialId: '',
@@ -221,11 +253,186 @@ function normalizeOperationalCost(raw: RawOperationalCost): OperationalCost {
   }
 }
 
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = typeof value === 'number' ? value : Number.parseFloat(String(value))
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function parseImages(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string' && v.trim() !== '')
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === 'string' && v.trim() !== '')
+    } catch { /* not valid JSON, ignore */ }
+  }
+  return []
+}
+
+type ParsedLocation = {
+  latitude: string
+  longitude: string
+  googleMapsUrl: string
+}
+
+function isCardinalDirection(value: string): value is 'N' | 'S' | 'E' | 'W' {
+  return value === 'N' || value === 'S' || value === 'E' || value === 'W'
+}
+
+function parseDmsComponent(component: string): number | null {
+  // Matches degrees, minutes, seconds with optional symbols: 40° 26' 46" or 40d 26m 46s
+  const match = component.trim().match(
+    /^\s*(-?\d+(?:\.\d+)?)(?:[°ºd]\s*(?:(\d+(?:\.\d+)?)(?:['′m]\s*(?:(\d+(?:\.\d+)?)(?:["″s])?)?)?)?)?\s*$/i,
+  )
+  if (!match) return null
+
+  const degrees = Number.parseFloat(match[1])
+  const minutes = match[2] ? Number.parseFloat(match[2]) : 0
+  const seconds = match[3] ? Number.parseFloat(match[3]) : 0
+
+  const absoluteValue = Math.abs(degrees) + minutes / 60 + seconds / 3600
+
+  return degrees < 0 ? -absoluteValue : absoluteValue
+}
+
+function parseDmsCoordinates(input: string): { latitude: string; longitude: string } | null {
+  // Handles both "40° 26' 46" N, 79° 58' 56" W" and "40:26:46N 79:58:56W"
+  const parts = input.trim().split(/\s*,\s*|\s+(?=[NSnsEWew])/)
+
+  if (parts.length !== 2) return null
+
+  const components: { value: number; isLatitude: boolean }[] = []
+
+  for (const part of parts) {
+    const directionMatch = part.trim().match(/[NSnsEWew]$/)
+    if (!directionMatch) return null
+    if (directionMatch.index === undefined) return null
+
+    const rawValue = part.slice(0, directionMatch.index).trim()
+    const direction = directionMatch[0].toUpperCase()
+    if (!isCardinalDirection(direction)) return null
+
+    const degrees = parseDmsComponent(rawValue)
+    if (degrees === null) return null
+
+    // N/S => latitude, E/W => longitude
+    const isLatitude = direction === 'N' || direction === 'S'
+    const sign = direction === 'N' || direction === 'E' ? 1 : -1
+
+    components.push({ value: degrees * sign, isLatitude })
+  }
+
+  const latitudeComponent = components.find((component) => component.isLatitude)
+  const longitudeComponent = components.find((component) => !component.isLatitude)
+
+  if (!latitudeComponent || !longitudeComponent) return null
+
+  const latitude = latitudeComponent.value
+  const longitude = longitudeComponent.value
+
+  if (latitude < -90 || latitude > 90) return null
+  if (longitude < -180 || longitude > 180) return null
+
+  return {
+    latitude: latitude.toFixed(6),
+    longitude: longitude.toFixed(6),
+  }
+}
+
+function extractCoordinatesFromUrl(url: string): { latitude: string; longitude: string } | null {
+  // Google Maps URLs embed coordinates in the path: /@lat,lng
+  const atCoordsMatch = url.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/)
+  if (atCoordsMatch) {
+    return { latitude: atCoordsMatch[1], longitude: atCoordsMatch[2] }
+  }
+
+  // Some share links use ?q=lat,lng or ?query=lat,lng
+  const queryCoordsMatch = url.match(/[?&](?:q|query)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/)
+  if (queryCoordsMatch) {
+    return { latitude: queryCoordsMatch[1], longitude: queryCoordsMatch[2] }
+  }
+
+  // Coordinates can also be packaged inside data matrices: !3dlat!4dlng
+  const dataCoordsMatch = url.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/)
+  if (dataCoordsMatch) {
+    return { latitude: dataCoordsMatch[1], longitude: dataCoordsMatch[2] }
+  }
+
+  return null
+}
+
+async function parseLocationInput(value: string): Promise<ParsedLocation> {
+  const trimmed = value.trim()
+  const result: ParsedLocation = { latitude: '', longitude: '', googleMapsUrl: trimmed }
+
+  if (!trimmed) return result
+
+  // Case 0: Cardinal / DMS coordinate pair, e.g. "40° 26' 46" N, 79° 58' 56" W"
+  const dmsCoords = parseDmsCoordinates(trimmed)
+  if (dmsCoords) {
+    result.latitude = dmsCoords.latitude
+    result.longitude = dmsCoords.longitude
+    return result
+  }
+
+  // Case 1: Standard comma-separated coordinate pair, e.g. "5.6037, -0.1870"
+  const coordsMatch = trimmed.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/)
+  if (coordsMatch) {
+    result.latitude = coordsMatch[1]
+    result.longitude = coordsMatch[2]
+    return result
+  }
+
+  const isMapsLink = /(^|\/)(maps\.google|maps\.app\.goo\.gl|goo\.gl)/i.test(trimmed)
+
+  // Case 2: Full Google Maps URL with extractable coordinates
+  if (isMapsLink) {
+    const extracted = extractCoordinatesFromUrl(trimmed)
+    if (extracted) {
+      result.latitude = extracted.latitude
+      result.longitude = extracted.longitude
+      return result
+    }
+  }
+
+  // Case 3: Short link (https://maps.app.goo.gl/...) — short links do not contain
+  // coordinates in the string itself, so we follow the redirect to expand the URL
+  // and extract coordinates from the final destination.
+  if (/^https?:\/\/maps\.app\.goo\.gl\//i.test(trimmed)) {
+    try {
+      const response = await fetch(trimmed, { redirect: 'follow' })
+      const longUrl = response.url || trimmed
+      const extracted = extractCoordinatesFromUrl(longUrl)
+      if (extracted) {
+        result.latitude = extracted.latitude
+        result.longitude = extracted.longitude
+        result.googleMapsUrl = longUrl
+        return result
+      }
+    } catch {
+      // Network / CORS failure: we still keep the short URL so the
+      // "Open in Google Maps" button works, but coordinates stay empty.
+    }
+  }
+
+  return result
+}
+
 function normalizeSite(raw: RawSite): Site {
   return {
     id: recordId(raw),
     name: textValue(raw.name, 'Untitled site'),
     laborCost: numberValue(raw.laborCost),
+    siteCode: textValue(raw.siteCode),
+    siteType: textValue(raw.siteType),
+    region: textValue(raw.region),
+    location: textValue(raw.location),
+    latitude: nullableNumber(raw.latitude),
+    longitude: nullableNumber(raw.longitude),
+    googleMapsUrl: textValue(raw.googleMapsUrl),
+    images: parseImages(raw.images),
+    notes: textValue(raw.notes),
     isArchived: booleanValue(raw.isArchived),
     materials: Array.isArray(raw.materials) ? raw.materials.map(normalizeMaterial) : [],
     activities: Array.isArray(raw.activities) ? raw.activities.map(normalizeActivity) : [],
@@ -385,6 +592,39 @@ function Icon({ name }: { name: IconName }) {
           <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
         </svg>
       )
+    case 'file-text':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" x2="8" y1="13" y2="13" />
+          <line x1="16" x2="8" y1="17" y2="17" />
+          <line x1="10" x2="8" y1="9" y2="9" />
+        </svg>
+      )
+    case 'image':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+          <circle cx="9" cy="9" r="2" />
+          <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+        </svg>
+      )
+    case 'info':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 16v-4" />
+          <path d="M12 8h.01" />
+        </svg>
+      )
+    case 'map-pin':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+          <circle cx="12" cy="10" r="3" />
+        </svg>
+      )
     case 'plus':
       return (
         <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -414,6 +654,16 @@ function Icon({ name }: { name: IconName }) {
           <path d="M19 6l-1 14H6L5 6" />
           <path d="M10 11v6" />
           <path d="M14 11v6" />
+        </svg>
+      )
+    case 'signal':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M2 20h.01" />
+          <path d="M7 20v-4" />
+          <path d="M12 20v-8" />
+          <path d="M17 20V8" />
+          <path d="M22 4v16" />
         </svg>
       )
   }
@@ -447,12 +697,13 @@ function SiteCard({ site, onView }: { site: Site; onView: (siteId: string) => vo
               <Icon name="building" />
             </div>
             <div>
-              <div className="site-name-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="site-name-container" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <h3 className="site-name" style={{ margin: 0 }}>{site.name}</h3>
+                {site.siteType ? <span className="badge badge-site-type">{site.siteType}</span> : null}
                 {site.isArchived ? <span className="badge badge-archived">Archived</span> : null}
               </div>
               <p className="site-meta-line">
-                {site.materials.length} materials / {site.activities.length} activities
+                {site.region ? `${site.region} · ` : ''}{site.materials.length} materials / {site.activities.length} activities
               </p>
             </div>
           </div>
@@ -539,6 +790,15 @@ function App() {
   const [siteModalMode, setSiteModalMode] = useState<SiteModalMode>('add')
   const [siteName, setSiteName] = useState('')
   const [siteNameError, setSiteNameError] = useState(false)
+  const [siteFormType, setSiteFormType] = useState('')
+  const [siteFormRegion, setSiteFormRegion] = useState('')
+  const [siteFormLocation, setSiteFormLocation] = useState('')
+  const [siteFormLocationInput, setSiteFormLocationInput] = useState('')
+  const [siteFormLatitude, setSiteFormLatitude] = useState('')
+  const [siteFormLongitude, setSiteFormLongitude] = useState('')
+  const [siteFormGoogleMapsUrl, setSiteFormGoogleMapsUrl] = useState('')
+  const [siteFormImages, setSiteFormImages] = useState<string[]>([''])
+  const [siteFormNotes, setSiteFormNotes] = useState('')
   const [materialMode, setMaterialMode] = useState<MaterialMode>('predefined')
   const [materialForm, setMaterialForm] = useState(emptyMaterialForm)
   const [materialErrors, setMaterialErrors] = useState<MaterialErrors>({})
@@ -553,6 +813,8 @@ function App() {
   const [companySettingsForm, setCompanySettingsForm] = useState(emptyCompanySettingsForm)
   const [companySettingsErrors, setCompanySettingsErrors] = useState<CompanySettingsErrors>({})
   const [showArchived, setShowArchived] = useState(false)
+  const [slideshowIndex, setSlideshowIndex] = useState(0)
+  const [isSlideshowOpen, setIsSlideshowOpen] = useState(false)
 
   const selectedSite = useMemo(
     () => sites.find((site) => site.id === currentSiteId) ?? null,
@@ -615,6 +877,25 @@ function App() {
     }
   }, [selectedSiteId, selectedSiteLaborCost])
 
+  useEffect(() => {
+    if (!isSlideshowOpen || !selectedSite) return
+    const slideshowImages = selectedSite.images
+    if (slideshowImages.length === 0) return
+
+    function handleSlideshowKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsSlideshowOpen(false)
+      } else if (event.key === 'ArrowRight') {
+        setSlideshowIndex((current) => (current + 1) % slideshowImages.length)
+      } else if (event.key === 'ArrowLeft') {
+        setSlideshowIndex((current) => (current - 1 + slideshowImages.length) % slideshowImages.length)
+      }
+    }
+
+    window.addEventListener('keydown', handleSlideshowKeyDown)
+    return () => window.removeEventListener('keydown', handleSlideshowKeyDown)
+  }, [isSlideshowOpen, selectedSite])
+
   function updateSiteLocally(siteId: string, updater: (site: Site) => Site) {
     setSites((currentSites) => currentSites.map((site) => (site.id === siteId ? updater(site) : site)))
   }
@@ -625,26 +906,47 @@ function App() {
 
   function showDashboard() {
     setCurrentSiteId(null)
-    setMainTab('materials')
+    setMainTab('about')
   }
 
   function showSiteDetails(siteId: string) {
     setCurrentSiteId(siteId)
-    setMainTab('materials')
+    setMainTab('about')
   }
 
   function openAddSiteModal() {
     setSiteModalMode('add')
     setSiteName('')
     setSiteNameError(false)
+    setSiteFormType('')
+    setSiteFormRegion('')
+    setSiteFormLocation('')
+    setSiteFormLocationInput('')
+    setSiteFormLatitude('')
+    setSiteFormLongitude('')
+    setSiteFormGoogleMapsUrl('')
+    setSiteFormImages([''])
+    setSiteFormNotes('')
     setModal('site')
   }
 
   function openEditSiteModal() {
     if (!selectedSite) return
+    const hasCoordinates = selectedSite.latitude !== null && selectedSite.longitude !== null
     setSiteModalMode('edit')
     setSiteName(selectedSite.name)
     setSiteNameError(false)
+    setSiteFormType(selectedSite.siteType)
+    setSiteFormRegion(selectedSite.region)
+    setSiteFormLocation(selectedSite.location)
+    setSiteFormLocationInput(
+      selectedSite.googleMapsUrl || (hasCoordinates ? `${selectedSite.latitude}, ${selectedSite.longitude}` : ''),
+    )
+    setSiteFormLatitude(selectedSite.latitude !== null ? String(selectedSite.latitude) : '')
+    setSiteFormLongitude(selectedSite.longitude !== null ? String(selectedSite.longitude) : '')
+    setSiteFormGoogleMapsUrl(selectedSite.googleMapsUrl)
+    setSiteFormImages(selectedSite.images.length > 0 ? [...selectedSite.images] : [''])
+    setSiteFormNotes(selectedSite.notes)
     setModal('site')
   }
 
@@ -672,6 +974,37 @@ function App() {
     setCompanySettingsForm(companySettings ?? emptyCompanySettingsForm)
     setCompanySettingsErrors({})
     setModal('company-settings')
+  }
+
+  function updateImageLink(index: number, value: string) {
+    setSiteFormImages((current) => current.map((image, i) => (i === index ? value : image)))
+  }
+
+  function addImageLink() {
+    setSiteFormImages((current) => [...current, ''])
+  }
+
+  function removeImageLink(index: number) {
+    setSiteFormImages((current) => current.filter((_, i) => i !== index))
+  }
+
+  function openSlideshow(index: number) {
+    setSlideshowIndex(index)
+    setIsSlideshowOpen(true)
+  }
+
+  function closeSlideshow() {
+    setIsSlideshowOpen(false)
+  }
+
+  function showNextImage() {
+    if (!selectedSite || selectedSite.images.length === 0) return
+    setSlideshowIndex((current) => (current + 1) % selectedSite.images.length)
+  }
+
+  function showPreviousImage() {
+    if (!selectedSite || selectedSite.images.length === 0) return
+    setSlideshowIndex((current) => (current - 1 + selectedSite.images.length) % selectedSite.images.length)
   }
 
   async function handleCompanySettingsSubmit(event: FormEvent<HTMLFormElement>) {
@@ -739,10 +1072,28 @@ function App() {
     setIsSaving(true)
     setErrorMessage(null)
 
+    // Re-parse the location input at submit time so a freshly pasted URL or short link is resolved
+    const parsedLocation = await parseLocationInput(siteFormLocationInput)
+    const resolvedLatitude = parsedLocation.latitude || siteFormLatitude
+    const resolvedLongitude = parsedLocation.longitude || siteFormLongitude
+    const resolvedGoogleMapsUrl = parsedLocation.googleMapsUrl || siteFormGoogleMapsUrl
+
+    const payload = {
+      name: trimmedName,
+      siteType: siteFormType || undefined,
+      region: siteFormRegion || undefined,
+      location: siteFormLocation || undefined,
+      latitude: resolvedLatitude ? Number.parseFloat(resolvedLatitude) : undefined,
+      longitude: resolvedLongitude ? Number.parseFloat(resolvedLongitude) : undefined,
+      googleMapsUrl: resolvedGoogleMapsUrl || undefined,
+      images: siteFormImages.length > 0 ? JSON.stringify(siteFormImages.map((url) => url.trim()).filter(Boolean)) : undefined,
+      notes: siteFormNotes || undefined,
+    }
+
     try {
       if (siteModalMode === 'add') {
         const newSite = {
-          name: trimmedName,
+          ...payload,
           laborCost: 0,
           materials: [],
           activities: [],
@@ -754,12 +1105,12 @@ function App() {
         })
         setSites((currentSites) => [...currentSites, normalizeSite({ ...newSite, ...createdSite })])
       } else if (selectedSite) {
-        const renamedSite = { ...selectedSite, name: trimmedName }
+        const updatedSite = { ...selectedSite, ...payload }
         const savedSite = await request<RawSite | undefined>(`/sites/${selectedSite.id}`, {
           method: 'PUT',
-          body: JSON.stringify(renamedSite),
+          body: JSON.stringify(payload),
         })
-        updateSiteLocally(selectedSite.id, (site) => normalizeSite({ ...site, ...renamedSite, ...(savedSite ?? {}) }))
+        updateSiteLocally(selectedSite.id, (site) => normalizeSite({ ...site, ...updatedSite, ...(savedSite ?? {}) }))
       }
 
       closeModal()
@@ -1001,7 +1352,7 @@ function App() {
         operationalCosts: [...site.operationalCosts, normalizeOperationalCost(savedCost ?? operationalCost)],
       }))
       closeModal()
-      setMainTab('operational-costs')
+      setMainTab('costs')
     } catch (error) {
       setErrorMessage(buildErrorMessage('Failed to add operational cost', error))
       console.error('Failed to add operational cost:', error)
@@ -1240,6 +1591,13 @@ function App() {
               <div className="tabs" role="tablist" aria-label="Site detail sections">
                 <button
                   type="button"
+                  className={`tab-btn ${mainTab === 'about' ? 'active' : ''}`}
+                  onClick={() => setMainTab('about')}
+                >
+                  About
+                </button>
+                <button
+                  type="button"
                   className={`tab-btn ${mainTab === 'materials' ? 'active' : ''}`}
                   onClick={() => setMainTab('materials')}
                 >
@@ -1254,19 +1612,116 @@ function App() {
                 </button>
                 <button
                   type="button"
-                  className={`tab-btn ${mainTab === 'operational-costs' ? 'active' : ''}`}
-                  onClick={() => setMainTab('operational-costs')}
-                >
-                  Operational Costs
-                </button>
-                <button
-                  type="button"
                   className={`tab-btn ${mainTab === 'costs' ? 'active' : ''}`}
                   onClick={() => setMainTab('costs')}
                 >
                   Costs
                 </button>
               </div>
+
+              {mainTab === 'about' ? (
+                <div className="tab-content active">
+                  <div className="tab-header">
+                    <h3 className="tab-title" style={{ margin: 0 }}>About Site</h3>
+                  </div>
+                  
+                  <div className="about-grid">
+                    {selectedSite.siteCode ? (
+                      <div className="about-field">
+                        <span className="about-label">Site Code</span>
+                        <div className="about-value"><span className="badge badge-site-type">{selectedSite.siteCode}</span></div>
+                      </div>
+                    ) : null}
+                    
+                    {selectedSite.siteType ? (
+                      <div className="about-field">
+                        <span className="about-label">Site Type</span>
+                        <div className="about-value">
+                          <span className="badge badge-site-type" style={{ backgroundColor: 'var(--primary-color)', color: 'white', display: 'inline-flex', gap: '4px' }}>
+                            <Icon name="signal" /> {selectedSite.siteType}
+                          </span>
+                        </div>
+                      </div>
+                    ) : null}
+                    
+                    <div className="about-field">
+                      <span className="about-label">Region</span>
+                      <div className="about-value">{selectedSite.region || <span className="text-light">Not set</span>}</div>
+                    </div>
+                    
+                    <div className="about-field">
+                      <span className="about-label">Location</span>
+                      <div className="about-value">{selectedSite.location || <span className="text-light">Not set</span>}</div>
+                    </div>
+                  </div>
+
+                  {(selectedSite.latitude !== null && selectedSite.longitude !== null) ? (
+                    <div className="about-section mt-4">
+                      <span className="about-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                        <Icon name="map-pin" /> GPS Location
+                      </span>
+                      <div className="map-container">
+                        <iframe
+                          title="Google Maps Preview"
+                          className="map-iframe"
+                          frameBorder="0"
+                          referrerPolicy="no-referrer-when-downgrade"
+                          src={`https://maps.google.com/maps?q=${selectedSite.latitude},${selectedSite.longitude}&hl=en&z=14&output=embed`}
+                          allowFullScreen
+                        ></iframe>
+                      </div>
+                      {selectedSite.googleMapsUrl ? (
+                        <div style={{ marginTop: '0.75rem' }}>
+                          <a href={selectedSite.googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary-color)', textDecoration: 'none', fontWeight: 600, fontSize: '0.875rem' }}>
+                            Open in Google Maps &rarr;
+                          </a>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {selectedSite.images && selectedSite.images.length > 0 ? (
+                    <div className="about-section mt-4">
+                      <span className="about-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                        <Icon name="image" /> Site Images
+                      </span>
+                      <div className="image-gallery">
+                        {selectedSite.images.map((img, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            className="image-gallery-item"
+                            onClick={() => openSlideshow(idx)}
+                            title={`View image ${idx + 1}`}
+                            aria-label={`View image ${idx + 1}`}
+                          >
+                            <img src={img} alt={`Site image ${idx + 1}`} loading="lazy" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {selectedSite.notes ? (
+                    <div className="about-section mt-4">
+                      <span className="about-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                        <Icon name="file-text" /> Notes
+                      </span>
+                      <div className="notes-display">
+                        {selectedSite.notes}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {(!selectedSite.siteCode && !selectedSite.siteType && !selectedSite.region && !selectedSite.location && selectedSite.latitude === null && selectedSite.longitude === null && selectedSite.images.length === 0 && !selectedSite.notes) ? (
+                    <EmptyPanel
+                      title="No site info available"
+                      text="Click the edit icon next to the site name to add information."
+                      icon="info"
+                    />
+                  ) : null}
+                </div>
+              ) : null}
 
               {mainTab === 'materials' ? (
                 <div className="tab-content active">
@@ -1363,16 +1818,41 @@ function App() {
                 </div>
               ) : null}
 
-              {mainTab === 'operational-costs' ? (
+              {mainTab === 'costs' ? (
                 <div className="tab-content active">
-                  <div className="tab-header">
-                    <h3 className="tab-title">Operational Costs</h3>
+                  <h3 className="tab-title">Labor Cost</h3>
+                  <form className="inline-panel mb-4" onSubmit={handleLaborCostSubmit}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label htmlFor="labor-cost-input">Amount (GHS)</label>
+                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1 }}>
+                          <input
+                            type="number"
+                            id="labor-cost-input"
+                            className="input"
+                            min="0"
+                            step="0.01"
+                            value={laborCostDraft}
+                            onChange={(event) => setLaborCostDraft(event.target.value)}
+                          />
+                          {laborCostError ? <p className="input-error">Labor cost must be a valid non-negative number</p> : null}
+                        </div>
+                        <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                          <Icon name="check" />
+                          <span>Update</span>
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+
+                  <div className="tab-header mt-4" style={{ marginTop: '2rem' }}>
+                    <h3 className="tab-title" style={{ margin: 0 }}>Operational Costs</h3>
                     <button type="button" className="btn btn-primary" onClick={openOperationalCostModal}>
                       <Icon name="plus" />
                       <span>Add Cost</span>
                     </button>
                   </div>
-                  <div className="list-container">
+                  <div className="list-container mb-4">
                     {selectedSite.operationalCosts.length === 0 ? (
                       <EmptyPanel
                         title="No operational costs added yet"
@@ -1401,33 +1881,8 @@ function App() {
                       ))
                     )}
                   </div>
-                </div>
-              ) : null}
 
-              {mainTab === 'costs' ? (
-                <div className="tab-content active">
-                  <h3 className="tab-title">Cost Management</h3>
-                  <form className="inline-panel" onSubmit={handleLaborCostSubmit}>
-                    <div className="form-group">
-                      <label htmlFor="labor-cost-input">Labor Cost (GHS)</label>
-                      <input
-                        type="number"
-                        id="labor-cost-input"
-                        className="input"
-                        min="0"
-                        step="0.01"
-                        value={laborCostDraft}
-                        onChange={(event) => setLaborCostDraft(event.target.value)}
-                      />
-                      {laborCostError ? <p className="input-error">Labor cost must be a valid non-negative number</p> : null}
-                    </div>
-                    <button type="submit" className="btn btn-primary" disabled={isSaving}>
-                      <Icon name="check" />
-                      <span>Update Labor Cost</span>
-                    </button>
-                  </form>
-
-                  <h3 className="tab-title mt-4">Cost Summary</h3>
+                  <h3 className="tab-title mt-4" style={{ marginTop: '2rem' }}>Cost Summary</h3>
                   <div className="inline-panel">
                     <div className="cost-summary">
                       <div className="cost-row">
@@ -1456,10 +1911,10 @@ function App() {
       </main>
 
       {modal === 'site' ? (
-        <Modal title={siteModalMode === 'add' ? 'Add New Site' : 'Edit Site Name'} onClose={closeModal}>
+        <Modal title={siteModalMode === 'add' ? 'Add New Site' : 'Edit Site Info'} onClose={closeModal}>
           <form className="modal-form" onSubmit={handleSiteSubmit}>
             <div className="form-group">
-              <label htmlFor="site-name-input">Site Name</label>
+              <label htmlFor="site-name-input">Site Name *</label>
               <input
                 type="text"
                 id="site-name-input"
@@ -1473,6 +1928,118 @@ function App() {
               />
               {siteNameError ? <p className="input-error">Site name is required</p> : null}
             </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="site-type-select">Site Type</label>
+                <select
+                  id="site-type-select"
+                  className="select"
+                  value={siteFormType}
+                  onChange={(event) => setSiteFormType(event.target.value)}
+                >
+                  <option value="">Select type</option>
+                  {siteTypeOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="site-region-input">Region</label>
+                <input
+                  type="text"
+                  id="site-region-input"
+                  className="input"
+                  placeholder="e.g. Greater Accra"
+                  value={siteFormRegion}
+                  onChange={(event) => setSiteFormRegion(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="site-location-input">Location</label>
+              <input
+                type="text"
+                id="site-location-input"
+                className="input"
+                placeholder="e.g. Adum, Kumasi"
+                value={siteFormLocation}
+                onChange={(event) => setSiteFormLocation(event.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="site-map-location-input">Map Location (Coordinates or Google Maps)</label>
+              <input
+                type="text"
+                id="site-map-location-input"
+                className="input"
+                placeholder={'e.g. 5.6037, -0.1870 · 40° 26\' 46" N, 79° 58\' 56" W · https://maps.app.goo.gl/...'}
+                value={siteFormLocationInput}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setSiteFormLocationInput(value)
+                  parseLocationInput(value).then((parsed) => {
+                    setSiteFormLatitude(parsed.latitude)
+                    setSiteFormLongitude(parsed.longitude)
+                    setSiteFormGoogleMapsUrl(parsed.googleMapsUrl)
+                  })
+                }}
+              />
+              <p className="form-help">
+                Paste decimal (e.g. 5.6037, -0.1870), cardinal coordinates
+                (e.g. 40° 26' 46" N, 79° 58' 56" W), or a Google Maps link (maps.app.goo.gl/...).
+              </p>
+              {siteFormLatitude && siteFormLongitude ? (
+                <p className="location-detected">Detected: {siteFormLatitude}, {siteFormLongitude}</p>
+              ) : null}
+            </div>
+
+            <div className="form-group">
+              <label>Images</label>
+              <div className="image-link-list">
+                {siteFormImages.map((imageUrl, index) => (
+                  <div className="image-link-row" key={index}>
+                    <input
+                      type="url"
+                      className="input"
+                      placeholder="https://example.com/img1.jpg"
+                      value={imageUrl}
+                      onChange={(event) => updateImageLink(index, event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-icon"
+                      onClick={() => removeImageLink(index)}
+                      aria-label={`Remove image link ${index + 1}`}
+                      title="Remove image link"
+                    >
+                      <Icon name="trash" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="btn btn-outline" onClick={addImageLink}>
+                <Icon name="plus" />
+                <span>Add Image Link</span>
+              </button>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="site-notes-input">Notes</label>
+              <textarea
+                id="site-notes-input"
+                className="input"
+                style={{ minHeight: '80px', resize: 'vertical' }}
+                placeholder="Any additional notes about the site..."
+                value={siteFormNotes}
+                onChange={(event) => setSiteFormNotes(event.target.value)}
+              />
+            </div>
+
             <div className="modal-footer">
               <button type="button" className="btn btn-outline" onClick={closeModal}>
                 Cancel
@@ -1848,6 +2415,34 @@ function App() {
             </div>
           </form>
         </Modal>
+      ) : null}
+
+      {isSlideshowOpen && selectedSite && selectedSite.images.length > 0 ? (
+        <div className="slideshow-modal" role="dialog" aria-modal="true" aria-label="Image slideshow" onMouseDown={closeSlideshow}>
+          <div className="slideshow-content" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" className="slideshow-close" onClick={closeSlideshow} aria-label="Close slideshow" title="Close slideshow">
+              <Icon name="close" />
+            </button>
+            <img
+              className="slideshow-image"
+              src={selectedSite.images[slideshowIndex]}
+              alt={`Site image ${slideshowIndex + 1}`}
+            />
+            {selectedSite.images.length > 1 ? (
+              <>
+                <button type="button" className="slideshow-nav slideshow-prev" onClick={showPreviousImage} aria-label="Previous image" title="Previous image">
+                  <Icon name="arrow-left" />
+                </button>
+                <button type="button" className="slideshow-nav slideshow-next" onClick={showNextImage} aria-label="Next image" title="Next image">
+                  <Icon name="arrow-right" />
+                </button>
+              </>
+            ) : null}
+            <div className="slideshow-counter">
+              {slideshowIndex + 1} / {selectedSite.images.length}
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   )

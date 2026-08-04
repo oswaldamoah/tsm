@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import './App.css'
 
-const API_BASE_URL = 'https://telecom-site-backend.onrender.com'
+const API_BASE_URL = 'https://tsm-backend-hhao.onrender.com'
 
 const predefinedMaterials = [
   { id: 'mat1', name: 'Fiber Optic Cable' },
@@ -70,9 +70,19 @@ type Site = {
   id: string
   name: string
   laborCost: number
+  isArchived: boolean
   materials: Material[]
   activities: Activity[]
   operationalCosts: OperationalCost[]
+}
+
+type CompanySettings = {
+  name: string
+  logoUrl: string
+  email: string
+  phone: string
+  address: string
+  website: string
 }
 
 type RawMaterial = {
@@ -103,22 +113,26 @@ type RawSite = {
   _id?: string | number
   name?: unknown
   laborCost?: unknown
+  isArchived?: unknown
   materials?: RawMaterial[] | null
   activities?: RawActivity[] | null
   operationalCosts?: RawOperationalCost[] | null
 }
 
 type MainTab = 'materials' | 'activities' | 'operational-costs' | 'costs'
-type ModalType = 'site' | 'material' | 'activity' | 'operational-cost' | 'delete-site' | null
+type ModalType = 'site' | 'material' | 'activity' | 'operational-cost' | 'delete-site' | 'company-settings' | null
 type SiteModalMode = 'add' | 'edit'
 type MaterialMode = 'predefined' | 'custom'
 type ActivityMode = 'predefined' | 'custom'
 type MaterialErrors = Partial<Record<'material' | 'customName' | 'quantity' | 'unit' | 'cost', boolean>>
 type ActivityErrors = Partial<Record<'activity' | 'customName', boolean>>
 type OperationalCostErrors = Partial<Record<'name' | 'amount', boolean>>
+type CompanySettingsErrors = Partial<Record<'name' | 'email', boolean>>
 type IconName =
   | 'arrow-left'
   | 'arrow-right'
+  | 'archive'
+  | 'archive-restore'
   | 'building'
   | 'check'
   | 'check-circle'
@@ -128,6 +142,7 @@ type IconName =
   | 'edit'
   | 'plus'
   | 'search'
+  | 'settings'
   | 'trash'
 
 const emptyMaterialForm = {
@@ -146,6 +161,15 @@ const emptyActivityForm = {
 const emptyOperationalCostForm = {
   name: '',
   amount: '0',
+}
+
+const emptyCompanySettingsForm = {
+  name: '',
+  logoUrl: '',
+  email: '',
+  phone: '',
+  address: '',
+  website: '',
 }
 
 function generateId() {
@@ -202,6 +226,7 @@ function normalizeSite(raw: RawSite): Site {
     id: recordId(raw),
     name: textValue(raw.name, 'Untitled site'),
     laborCost: numberValue(raw.laborCost),
+    isArchived: booleanValue(raw.isArchived),
     materials: Array.isArray(raw.materials) ? raw.materials.map(normalizeMaterial) : [],
     activities: Array.isArray(raw.activities) ? raw.activities.map(normalizeActivity) : [],
     operationalCosts: Array.isArray(raw.operationalCosts) ? raw.operationalCosts.map(normalizeOperationalCost) : [],
@@ -291,6 +316,23 @@ function Icon({ name }: { name: IconName }) {
           <path d="m12 5 7 7-7 7" />
         </svg>
       )
+    case 'archive':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="21 8 21 21 3 21 3 8"></polyline>
+          <rect x="1" y="3" width="22" height="5"></rect>
+          <line x1="10" y1="12" x2="14" y2="12"></line>
+        </svg>
+      )
+    case 'archive-restore':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect width="20" height="5" x="2" y="3" rx="1"></rect>
+          <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+          <path d="m9 15 3-3 3 3"></path>
+          <path d="M12 12v9"></path>
+        </svg>
+      )
     case 'building':
       return (
         <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -352,9 +394,16 @@ function Icon({ name }: { name: IconName }) {
       )
     case 'search':
       return (
-        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="11" cy="11" r="8" />
           <path d="m21 21-4.3-4.3" />
+        </svg>
+      )
+    case 'settings':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
         </svg>
       )
     case 'trash':
@@ -398,7 +447,10 @@ function SiteCard({ site, onView }: { site: Site; onView: (siteId: string) => vo
               <Icon name="building" />
             </div>
             <div>
-              <h3 className="site-name">{site.name}</h3>
+              <div className="site-name-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 className="site-name" style={{ margin: 0 }}>{site.name}</h3>
+                {site.isArchived ? <span className="badge badge-archived">Archived</span> : null}
+              </div>
               <p className="site-meta-line">
                 {site.materials.length} materials / {site.activities.length} activities
               </p>
@@ -497,6 +549,10 @@ function App() {
   const [operationalCostErrors, setOperationalCostErrors] = useState<OperationalCostErrors>({})
   const [laborCostDraft, setLaborCostDraft] = useState('0')
   const [laborCostError, setLaborCostError] = useState(false)
+  const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null)
+  const [companySettingsForm, setCompanySettingsForm] = useState(emptyCompanySettingsForm)
+  const [companySettingsErrors, setCompanySettingsErrors] = useState<CompanySettingsErrors>({})
+  const [showArchived, setShowArchived] = useState(false)
 
   const selectedSite = useMemo(
     () => sites.find((site) => site.id === currentSiteId) ?? null,
@@ -517,19 +573,26 @@ function App() {
   useEffect(() => {
     let isMounted = true
 
-    async function loadSites() {
+    async function loadInitialData() {
       setIsLoading(true)
       setErrorMessage(null)
 
       try {
-        const data = await request<RawSite[]>('/sites')
+        const [sitesData, settingsData] = await Promise.all([
+          request<RawSite[]>(`/sites${showArchived ? '?include_archived=true' : ''}`),
+          request<CompanySettings>('/company-settings').catch(() => null)
+        ])
+        
         if (isMounted) {
-          setSites(data.map(normalizeSite))
+          setSites(sitesData.map(normalizeSite))
+          if (settingsData) {
+            setCompanySettings(settingsData)
+          }
         }
       } catch (error) {
         if (isMounted) {
-          setErrorMessage(buildErrorMessage('Failed to load sites', error))
-          console.error('Failed to load sites:', error)
+          setErrorMessage(buildErrorMessage('Failed to load initial data', error))
+          console.error('Failed to load initial data:', error)
         }
       } finally {
         if (isMounted) {
@@ -538,12 +601,12 @@ function App() {
       }
     }
 
-    loadSites()
+    loadInitialData()
 
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [showArchived])
 
   useEffect(() => {
     if (selectedSiteId && selectedSiteLaborCost !== undefined) {
@@ -603,6 +666,65 @@ function App() {
     setOperationalCostForm(emptyOperationalCostForm)
     setOperationalCostErrors({})
     setModal('operational-cost')
+  }
+
+  function openCompanySettingsModal() {
+    setCompanySettingsForm(companySettings ?? emptyCompanySettingsForm)
+    setCompanySettingsErrors({})
+    setModal('company-settings')
+  }
+
+  async function handleCompanySettingsSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    
+    const nextErrors: CompanySettingsErrors = {}
+    if (!companySettingsForm.name.trim()) nextErrors.name = true
+    if (!companySettingsForm.email.trim()) nextErrors.email = true
+
+    setCompanySettingsErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
+
+    setIsSaving(true)
+    setErrorMessage(null)
+
+    try {
+      const savedSettings = await request<CompanySettings>('/company-settings', {
+        method: 'PUT',
+        body: JSON.stringify(companySettingsForm)
+      })
+      setCompanySettings(savedSettings)
+      closeModal()
+    } catch (error) {
+      setErrorMessage(buildErrorMessage('Failed to save company settings', error))
+      console.error('Failed to save company settings:', error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function toggleArchiveSite(siteId: string, isCurrentlyArchived: boolean) {
+    setIsSaving(true)
+    setErrorMessage(null)
+
+    try {
+      const endpoint = isCurrentlyArchived ? `/sites/${siteId}/unarchive` : `/sites/${siteId}/archive`
+      await request<void>(endpoint, { method: 'POST' })
+      
+      updateSiteLocally(siteId, (site) => ({ ...site, isArchived: !isCurrentlyArchived }))
+      if (isCurrentlyArchived && !showArchived) {
+        // Just unarchived while looking at non-archived, wait, this shouldn't happen usually
+      } else if (!isCurrentlyArchived && !showArchived) {
+        // Archived while looking at non-archived, remove from view
+        setSites(currentSites => currentSites.filter(s => s.id !== siteId))
+        showDashboard()
+      }
+    } catch (error) {
+      const action = isCurrentlyArchived ? 'unarchive' : 'archive'
+      setErrorMessage(buildErrorMessage(`Failed to ${action} site`, error))
+      console.error(`Failed to ${action} site:`, error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   async function handleSiteSubmit(event: FormEvent<HTMLFormElement>) {
@@ -980,12 +1102,18 @@ function App() {
       <header className="header">
         <div className="container header-container">
           <div className="header-left">
-            <h1 className="app-title">Telecom Site Manager</h1>
+            {companySettings?.logoUrl ? <img src={companySettings.logoUrl} alt="Logo" className="company-logo" /> : null}
+            <h1 className="app-title">{companySettings?.name || 'Telecom Site Manager'}</h1>
           </div>
-          <button type="button" className="btn btn-outline" onClick={exportData}>
-            <Icon name="download" />
-            <span className="btn-text">Export Data</span>
-          </button>
+          <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button type="button" className="btn btn-icon" onClick={openCompanySettingsModal} aria-label="Settings" title="Settings">
+              <Icon name="settings" />
+            </button>
+            <button type="button" className="btn btn-outline" onClick={exportData}>
+              <Icon name="download" />
+              <span className="btn-text">Export Data</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1004,6 +1132,15 @@ function App() {
             <div className="dashboard-header">
               <h2 className="section-title">Sites</h2>
               <div className="dashboard-actions">
+                <label className="toggle-switch">
+                  <input 
+                    type="checkbox" 
+                    checked={showArchived} 
+                    onChange={(e) => setShowArchived(e.target.checked)} 
+                  />
+                  <span className="toggle-slider"></span>
+                  <span className="toggle-label" style={{ marginLeft: '8px', fontSize: '0.9rem' }}>Show Archived</span>
+                </label>
                 <div className="search-container">
                   <Icon name="search" />
                   <input
@@ -1055,10 +1192,16 @@ function App() {
                   <span>{selectedSiteTotals?.progress ?? 0}% complete</span>
                 </div>
               </div>
-              <button type="button" className="btn btn-danger" onClick={() => setModal('delete-site')}>
-                <Icon name="trash" />
-                <span className="btn-text">Delete Site</span>
-              </button>
+              <div className="site-details-actions" style={{ display: 'flex', gap: '8px' }}>
+                <button type="button" className="btn btn-outline" onClick={() => toggleArchiveSite(selectedSite.id, selectedSite.isArchived)} disabled={isSaving}>
+                  <Icon name={selectedSite.isArchived ? "archive-restore" : "archive"} />
+                  <span className="btn-text">{selectedSite.isArchived ? "Unarchive" : "Archive"}</span>
+                </button>
+                <button type="button" className="btn btn-danger" onClick={() => setModal('delete-site')}>
+                  <Icon name="trash" />
+                  <span className="btn-text">Delete Site</span>
+                </button>
+              </div>
             </div>
 
             <div className="cost-summary-cards">
@@ -1614,6 +1757,96 @@ function App() {
               </button>
             </div>
           </div>
+        </Modal>
+      ) : null}
+
+      {modal === 'company-settings' ? (
+        <Modal title="Company Settings" onClose={closeModal}>
+          <form className="modal-form" onSubmit={handleCompanySettingsSubmit}>
+            <div className="form-group">
+              <label htmlFor="settings-name-input">Company Name</label>
+              <input
+                type="text"
+                id="settings-name-input"
+                className="input"
+                value={companySettingsForm.name}
+                onChange={(event) => {
+                  setCompanySettingsForm((form) => ({ ...form, name: event.target.value }))
+                  setCompanySettingsErrors((errors) => ({ ...errors, name: false }))
+                }}
+              />
+              {companySettingsErrors.name ? <p className="input-error">Company name is required</p> : null}
+            </div>
+            
+            <div className="form-group">
+              <label htmlFor="settings-logo-input">Logo URL</label>
+              <input
+                type="url"
+                id="settings-logo-input"
+                className="input"
+                value={companySettingsForm.logoUrl}
+                onChange={(event) => setCompanySettingsForm((form) => ({ ...form, logoUrl: event.target.value }))}
+              />
+            </div>
+            
+            <div className="form-group">
+              <label htmlFor="settings-email-input">Email</label>
+              <input
+                type="email"
+                id="settings-email-input"
+                className="input"
+                value={companySettingsForm.email}
+                onChange={(event) => {
+                  setCompanySettingsForm((form) => ({ ...form, email: event.target.value }))
+                  setCompanySettingsErrors((errors) => ({ ...errors, email: false }))
+                }}
+              />
+              {companySettingsErrors.email ? <p className="input-error">Email is required</p> : null}
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="settings-phone-input">Phone</label>
+              <input
+                type="text"
+                id="settings-phone-input"
+                className="input"
+                value={companySettingsForm.phone}
+                onChange={(event) => setCompanySettingsForm((form) => ({ ...form, phone: event.target.value }))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="settings-address-input">Address</label>
+              <input
+                type="text"
+                id="settings-address-input"
+                className="input"
+                value={companySettingsForm.address}
+                onChange={(event) => setCompanySettingsForm((form) => ({ ...form, address: event.target.value }))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="settings-website-input">Website</label>
+              <input
+                type="url"
+                id="settings-website-input"
+                className="input"
+                value={companySettingsForm.website}
+                onChange={(event) => setCompanySettingsForm((form) => ({ ...form, website: event.target.value }))}
+              />
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" className="btn btn-outline" onClick={closeModal}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                <Icon name="check" />
+                <span>Save Settings</span>
+              </button>
+            </div>
+          </form>
         </Modal>
       ) : null}
     </div>

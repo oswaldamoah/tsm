@@ -756,6 +756,81 @@ label {
   color: var(--text-secondary);
 }
 
+.company-logo {
+  height: 2.25rem;
+  max-width: 8rem;
+  object-fit: contain;
+  margin-right: 0.75rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.badge-archived {
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: relative;
+  display: inline-block;
+  width: 2.5rem;
+  height: 1.25rem;
+  background-color: var(--bg-tertiary);
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  transition: .4s;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 0.875rem;
+  width: 0.875rem;
+  left: 0.125rem;
+  bottom: 0.125rem;
+  background-color: var(--text-secondary);
+  border-radius: 50%;
+  transition: .4s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(1.25rem);
+  background-color: white;
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 @media (min-width: 640px) {
   .form-row {
     grid-template-columns: 1fr 1fr;

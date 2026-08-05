@@ -1991,7 +1991,7 @@ function App() {
               />
               <p className="form-help">
                 Paste decimal (e.g. 5.6037, -0.1870), cardinal coordinates
-                (e.g. 40° 26' 46" N, 79° 58' 56" W), or a Google Maps link (maps.app.goo.gl/...).
+                (e.g. 40°26'46"N, 79°58'56"W), or a Google Maps link (maps.app.goo.gl/...).
               </p>
               {siteFormLatitude && siteFormLongitude ? (
                 <p className="location-detected">Detected: {siteFormLatitude}, {siteFormLongitude}</p>

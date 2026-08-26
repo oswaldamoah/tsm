@@ -4,6 +4,191 @@ import './App.css'
 
 const API_BASE_URL = 'https://tsm-backend-hhao.onrender.com'
 
+// ============ AUTH TYPES & HELPERS ============
+
+type AuthUser = {
+  username: string
+  role: 'admin' | 'manager'
+}
+
+type LoginCredentials = {
+  username: string
+  password: string
+}
+
+type LoginResponse = {
+  access_token: string
+  token_type: string
+  username: string
+  role: 'admin' | 'manager'
+}
+
+const AUTH_STORAGE_KEYS = {
+  TOKEN: 'auth_token',
+  USERNAME: 'auth_username',
+  ROLE: 'auth_role',
+} as const
+
+const getStoredAuth = (): AuthUser | null => {
+  if (typeof window === 'undefined') return null
+  const token = localStorage.getItem(AUTH_STORAGE_KEYS.TOKEN)
+  const username = localStorage.getItem(AUTH_STORAGE_KEYS.USERNAME)
+  const role = localStorage.getItem(AUTH_STORAGE_KEYS.ROLE)
+
+  if (!token || !username || !role) return null
+
+  if (role !== 'admin' && role !== 'manager') return null
+
+  return { username, role }
+}
+
+const setStoredAuth = (data: LoginResponse) => {
+  localStorage.setItem(AUTH_STORAGE_KEYS.TOKEN, data.access_token)
+  localStorage.setItem(AUTH_STORAGE_KEYS.USERNAME, data.username)
+  localStorage.setItem(AUTH_STORAGE_KEYS.ROLE, data.role)
+}
+
+const clearStoredAuth = () => {
+  localStorage.removeItem(AUTH_STORAGE_KEYS.TOKEN)
+  localStorage.removeItem(AUTH_STORAGE_KEYS.USERNAME)
+  localStorage.removeItem(AUTH_STORAGE_KEYS.ROLE)
+}
+
+const loginUser = async (credentials: LoginCredentials): Promise<LoginResponse> => {
+  const res = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Login failed' }))
+    throw new Error(err.detail || 'Invalid credentials')
+  }
+
+  return res.json()
+}
+
+// ============ LOGIN PAGE COMPONENT ============
+
+const LoginPage = ({ onLogin }: { onLogin: (user: AuthUser) => void }) => {
+  const [form, setForm] = useState<LoginCredentials>({ username: '', password: '' })
+  const [errors, setErrors] = useState<Partial<Record<keyof LoginCredentials, boolean>>>({})
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+
+  const validateForm = () => {
+    const newErrors: Partial<Record<keyof LoginCredentials, boolean>> = {}
+    if (!form.username.trim()) newErrors.username = true
+    if (!form.password.trim()) newErrors.password = true
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!validateForm()) return
+
+    setIsLoading(true)
+    setErrorMessage(null)
+
+    try {
+      const data = await loginUser(form)
+      setStoredAuth(data)
+      onLogin({ username: data.username, role: data.role })
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Login failed')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target
+    setForm((prev) => ({ ...prev, [name]: value }))
+    if (errors[name as keyof LoginCredentials]) {
+      setErrors((prev) => ({ ...prev, [name]: false }))
+    }
+  }
+
+  return (
+    <div className="login-page">
+      <div className="login-card">
+        <div className="login-header">
+          <div className="login-logo">
+            <img src="/favicon.png" alt="Telecom Site Manager" className="login-icon" />
+          </div>
+          <div className="login-text">
+            <h1 className="login-title">Telecom Site Manager</h1>
+            <p className="login-subtitle">Sign in to manage your sites</p>
+          </div>
+        </div>
+
+        {errorMessage && (
+          <div className="login-error" role="alert">
+            <Icon name="info" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        <form className="login-form" onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="username">Username</label>
+            <input
+              type="text"
+              id="username"
+              name="username"
+              className={`input ${errors.username ? 'invalid' : ''}`}
+              value={form.username}
+              onChange={handleChange}
+              placeholder="Enter username"
+              disabled={isLoading}
+              autoComplete="username"
+              autoFocus
+            />
+            {errors.username && <p className="input-error">Username is required</p>}
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="password">Password</label>
+            <input
+              type="password"
+              id="password"
+              name="password"
+              className={`input ${errors.password ? 'invalid' : ''}`}
+              value={form.password}
+              onChange={handleChange}
+              placeholder="Enter password"
+              disabled={isLoading}
+              autoComplete="current-password"
+            />
+            {errors.password && <p className="input-error">Password is required</p>}
+          </div>
+
+          <button type="submit" className="btn btn-primary btn-block" disabled={isLoading}>
+            {isLoading ? (
+              <>
+                <span className="spinner" />
+                <span>Signing in...</span>
+              </>
+            ) : (
+              'Sign In'
+            )}
+          </button>
+        </form>
+
+        <div className="login-footer">
+          <p className="login-hint">
+            Default credentials:
+            <code>admin / admin123</code>
+            <code>manager / manager123</code>
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const predefinedMaterials = [
   { id: 'mat1', name: 'Fiber Optic Cable' },
   { id: 'mat2', name: 'Steel Band' },
@@ -489,6 +674,12 @@ async function request<T>(path: string, options: RequestInit = {}) {
     headers.set('Content-Type', 'application/json')
   }
 
+  // Add auth token if available
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
@@ -779,6 +970,7 @@ function EmptyPanel({
 }
 
 function App() {
+  const [user, setUser] = useState<AuthUser | null>(getStoredAuth())
   const [sites, setSites] = useState<Site[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -815,6 +1007,19 @@ function App() {
   const [showArchived, setShowArchived] = useState(false)
   const [slideshowIndex, setSlideshowIndex] = useState(0)
   const [isSlideshowOpen, setIsSlideshowOpen] = useState(false)
+
+  const handleLogin = (authUser: AuthUser) => {
+    setUser(authUser)
+  }
+
+  const handleLogout = () => {
+    clearStoredAuth()
+    setUser(null)
+    setSites([])
+    setCurrentSiteId(null)
+    setMainTab('materials')
+    setModal(null)
+  }
 
   const selectedSite = useMemo(
     () => sites.find((site) => site.id === currentSiteId) ?? null,
@@ -1332,7 +1537,7 @@ function App() {
     const operationalCost: OperationalCost = {
       id: generateId(),
       name: costName,
-      amount,
+      amount,    
     }
 
     setIsSaving(true)
@@ -1448,6 +1653,11 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  // Show login page if not authenticated
+  if (!user) {
+    return <LoginPage onLogin={handleLogin} />
+  }
+
   return (
     <div className="app-shell">
       <header className="header">
@@ -1457,12 +1667,19 @@ function App() {
             <h1 className="app-title">{companySettings?.name || 'Telecom Site Manager'}</h1>
           </div>
           <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="user-info" style={{ fontSize: '0.85rem', color: 'var(--muted-foreground)', marginRight: '8px' }}>
+              {user.username} ({user.role})
+            </span>
             <button type="button" className="btn btn-icon" onClick={openCompanySettingsModal} aria-label="Settings" title="Settings">
               <Icon name="settings" />
             </button>
             <button type="button" className="btn btn-outline" onClick={exportData}>
               <Icon name="download" />
               <span className="btn-text">Export Data</span>
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={handleLogout} style={{ marginLeft: '8px' }}>
+              <Icon name="arrow-left" />
+              <span className="btn-text">Logout</span>
             </button>
           </div>
         </div>

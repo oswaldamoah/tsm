@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent, ReactNode, SyntheticEvent } from 'react'
 import './App.css'
 
 const API_BASE_URL = 'https://tsm-backend-hhao.onrender.com'
@@ -353,7 +353,7 @@ type MaterialErrors = Partial<Record<'material' | 'customName' | 'quantity' | 'u
 type ActivityErrors = Partial<Record<'activity' | 'customName', boolean>>
 type OperationalCostErrors = Partial<Record<'name' | 'amount', boolean>>
 type CompanySettingsErrors = Partial<Record<'name' | 'email', boolean>>
-type SiteSortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc'
+type SiteSortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'archived'
 type ActivitySortOption = 'newest' | 'start' | 'end' | 'name'
 type SiteViewLayout = 'grid' | 'list'
 
@@ -1060,12 +1060,53 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   )
 }
 
+const LONG_PRESS_MS = 500
+
+function useLongPress(onLongPress: () => void) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const firedRef = useRef(false)
+
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  const start = () => {
+    firedRef.current = false
+    clearTimer()
+    timerRef.current = setTimeout(() => {
+      firedRef.current = true
+      onLongPress()
+    }, LONG_PRESS_MS)
+  }
+
+  return {
+    onTouchStart: start,
+    onTouchEnd: clearTimer,
+    onTouchMove: clearTimer,
+    onTouchCancel: clearTimer,
+    onContextMenu: (event: SyntheticEvent) => {
+      if (firedRef.current) event.preventDefault()
+    },
+    onClickCapture: (event: SyntheticEvent) => {
+      if (firedRef.current) {
+        event.preventDefault()
+        event.stopPropagation()
+        firedRef.current = false
+      }
+    },
+  }
+}
+
 function SiteCard({
   site,
   onView,
   selectMode = false,
   isSelected = false,
   onToggleSelect,
+  onLongPress,
   layout = 'grid',
 }: {
   site: Site
@@ -1073,10 +1114,13 @@ function SiteCard({
   selectMode?: boolean
   isSelected?: boolean
   onToggleSelect?: (siteId: string) => void
+  onLongPress?: (siteId: string) => void
   layout?: SiteViewLayout
 }) {
   const totals = calculateSiteTotals(site)
   const createdLabel = formatDate(site.createdAt)
+  const longPressHandlers = useLongPress(() => onLongPress?.(site.id))
+  const pressHandlers = !selectMode && onLongPress ? longPressHandlers : {}
 
   const selectCheckbox = selectMode ? (
     <label className="site-card-select" onClick={(event) => event.stopPropagation()}>
@@ -1098,6 +1142,7 @@ function SiteCard({
           type="button"
           className="site-list-row"
           onClick={() => (selectMode ? onToggleSelect?.(site.id) : onView(site.id))}
+          {...pressHandlers}
         >
           <div className="site-icon">
             <Icon name="building" />
@@ -1185,12 +1230,92 @@ function SiteCard({
           type="button"
           className="view-details-btn"
           onClick={() => (selectMode ? onToggleSelect?.(site.id) : onView(site.id))}
+          {...pressHandlers}
         >
           <span>{selectMode ? (isSelected ? 'Selected' : 'Select') : 'View Details'}</span>
           <Icon name="arrow-right" />
         </button>
       </div>
     </article>
+  )
+}
+
+function ActivityListItem({
+  activity,
+  selectMode,
+  isSelected,
+  onToggleSelect,
+  onLongPress,
+  onToggleComplete,
+  onEdit,
+  onRemove,
+}: {
+  activity: Activity
+  selectMode: boolean
+  isSelected: boolean
+  onToggleSelect: (activityId: string) => void
+  onLongPress: (activityId: string) => void
+  onToggleComplete: (activity: Activity) => void
+  onEdit: (activity: Activity) => void
+  onRemove: (activityId: string) => void
+}) {
+  const rangeLabel = formatActivityRange(activity.startDatetime, activity.endDatetime)
+  const longPressHandlers = useLongPress(() => onLongPress(activity.id))
+  const pressHandlers = !selectMode ? longPressHandlers : {}
+
+  return (
+    <div className="list-item">
+      <div className="list-item-content" {...pressHandlers}>
+        {selectMode ? (
+          <input
+            type="checkbox"
+            className="select-checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(activity.id)}
+            aria-label={`Select ${activity.name}`}
+          />
+        ) : (
+          <button
+            type="button"
+            className={`list-item-checkbox ${activity.completed ? 'checked' : ''}`}
+            onClick={() => onToggleComplete(activity)}
+            aria-label={activity.completed ? 'Mark activity incomplete' : 'Mark activity complete'}
+            title={activity.completed ? 'Mark incomplete' : 'Mark complete'}
+          >
+            <Icon name={activity.completed ? 'check-circle' : 'circle'} />
+          </button>
+        )}
+        <div>
+          <h4 className={`list-item-title ${activity.completed ? 'completed' : ''}`}>
+            {activity.name}
+            {activity.isArchived ? (
+              <span className="badge badge-archived" style={{ marginLeft: '0.5rem' }}>Archived</span>
+            ) : null}
+          </h4>
+          {rangeLabel ? <p className="activity-datetime">{rangeLabel}</p> : null}
+        </div>
+      </div>
+      <div className="list-item-actions">
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => onEdit(activity)}
+          aria-label={`Edit ${activity.name}`}
+          title={`Edit ${activity.name}`}
+        >
+          <Icon name="edit" />
+        </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => onRemove(activity.id)}
+          aria-label={`Remove ${activity.name}`}
+          title={`Remove ${activity.name}`}
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -1336,9 +1461,13 @@ function App() {
 
   const filteredSites = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase()
-    const base = normalizedSearch
+    let base = normalizedSearch
       ? sites.filter((site) => site.name.toLowerCase().includes(normalizedSearch))
       : sites
+
+    if (siteSortOption === 'archived') {
+      base = base.filter((site) => site.isArchived)
+    }
 
     const sorted = [...base]
     switch (siteSortOption) {
@@ -1352,6 +1481,7 @@ function App() {
         sorted.sort((a, b) => b.name.localeCompare(a.name))
         break
       case 'newest':
+      case 'archived':
       default:
         sorted.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
         break
@@ -1658,6 +1788,11 @@ function App() {
       }
       return next
     })
+  }
+
+  function handleSiteLongPress(siteId: string) {
+    setSiteSelectMode(true)
+    setSelectedSiteIds((current) => new Set(current).add(siteId))
   }
 
   async function bulkArchiveSites(archive: boolean) {
@@ -1982,6 +2117,11 @@ function App() {
       }
       return next
     })
+  }
+
+  function handleActivityLongPress(activityId: string) {
+    setActivitySelectMode(true)
+    setSelectedActivityIds((current) => new Set(current).add(activityId))
   }
 
   async function bulkArchiveActivities(archive: boolean) {
@@ -2491,13 +2631,20 @@ function App() {
                   className="select"
                   style={{ width: 'auto' }}
                   value={siteSortOption}
-                  onChange={(event) => setSiteSortOption(event.target.value as SiteSortOption)}
+                  onChange={(event) => {
+                    const nextOption = event.target.value as SiteSortOption
+                    setSiteSortOption(nextOption)
+                    if (nextOption === 'archived') {
+                      setShowArchived(true)
+                    }
+                  }}
                   aria-label="Sort sites"
                 >
                   <option value="newest">Newest first</option>
                   <option value="oldest">Oldest first</option>
                   <option value="name-asc">Name (A–Z)</option>
                   <option value="name-desc">Name (Z–A)</option>
+                  <option value="archived">Archived</option>
                 </select>
                 <div className="search-container">
                   <Icon name="search" />
@@ -2531,7 +2678,11 @@ function App() {
                     <Icon name="list" />
                   </button>
                 </div>
-                <button type="button" className="btn btn-outline" onClick={toggleSiteSelectMode}>
+                <button
+                  type="button"
+                  className={`btn btn-outline select-mode-btn${siteSelectMode ? ' is-active' : ''}`}
+                  onClick={toggleSiteSelectMode}
+                >
                   <Icon name="check-circle" />
                   <span className="btn-text">{siteSelectMode ? 'Cancel' : 'Select'}</span>
                 </button>
@@ -2580,6 +2731,7 @@ function App() {
                     selectMode={siteSelectMode}
                     isSelected={selectedSiteIds.has(site.id)}
                     onToggleSelect={toggleSiteSelected}
+                    onLongPress={handleSiteLongPress}
                     layout={siteViewLayout}
                   />
                 ))
@@ -2868,7 +3020,11 @@ function App() {
                       <option value="end">End date</option>
                       <option value="name">Name</option>
                     </select>
-                    <button type="button" className="btn btn-outline" onClick={toggleActivitySelectMode}>
+                    <button
+                      type="button"
+                      className={`btn btn-outline select-mode-btn${activitySelectMode ? ' is-active' : ''}`}
+                      onClick={toggleActivitySelectMode}
+                    >
                       <Icon name="check-circle" />
                       <span className="btn-text">{activitySelectMode ? 'Cancel' : 'Select'}</span>
                     </button>
@@ -2903,63 +3059,19 @@ function App() {
                         icon="check-circle"
                       />
                     ) : (
-                      visibleActivities.map((activity) => {
-                        const rangeLabel = formatActivityRange(activity.startDatetime, activity.endDatetime)
-                        return (
-                          <div className="list-item" key={activity.id}>
-                            <div className="list-item-content">
-                              {activitySelectMode ? (
-                                <input
-                                  type="checkbox"
-                                  className="select-checkbox"
-                                  checked={selectedActivityIds.has(activity.id)}
-                                  onChange={() => toggleActivitySelected(activity.id)}
-                                  aria-label={`Select ${activity.name}`}
-                                />
-                              ) : (
-                                <button
-                                  type="button"
-                                  className={`list-item-checkbox ${activity.completed ? 'checked' : ''}`}
-                                  onClick={() => toggleActivity(activity)}
-                                  aria-label={activity.completed ? 'Mark activity incomplete' : 'Mark activity complete'}
-                                  title={activity.completed ? 'Mark incomplete' : 'Mark complete'}
-                                >
-                                  <Icon name={activity.completed ? 'check-circle' : 'circle'} />
-                                </button>
-                              )}
-                              <div>
-                                <h4 className={`list-item-title ${activity.completed ? 'completed' : ''}`}>
-                                  {activity.name}
-                                  {activity.isArchived ? (
-                                    <span className="badge badge-archived" style={{ marginLeft: '0.5rem' }}>Archived</span>
-                                  ) : null}
-                                </h4>
-                                {rangeLabel ? <p className="activity-datetime">{rangeLabel}</p> : null}
-                              </div>
-                            </div>
-                            <div className="list-item-actions">
-                              <button
-                                type="button"
-                                className="btn btn-icon"
-                                onClick={() => openEditActivityModal(activity)}
-                                aria-label={`Edit ${activity.name}`}
-                                title={`Edit ${activity.name}`}
-                              >
-                                <Icon name="edit" />
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-icon"
-                                onClick={() => removeActivity(activity.id)}
-                                aria-label={`Remove ${activity.name}`}
-                                title={`Remove ${activity.name}`}
-                              >
-                                <Icon name="trash" />
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      })
+                      visibleActivities.map((activity) => (
+                        <ActivityListItem
+                          key={activity.id}
+                          activity={activity}
+                          selectMode={activitySelectMode}
+                          isSelected={selectedActivityIds.has(activity.id)}
+                          onToggleSelect={toggleActivitySelected}
+                          onLongPress={handleActivityLongPress}
+                          onToggleComplete={toggleActivity}
+                          onEdit={openEditActivityModal}
+                          onRemove={removeActivity}
+                        />
+                      ))
                     )}
                   </div>
                 </div>

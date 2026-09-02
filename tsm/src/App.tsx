@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { FormEvent, ReactNode, SyntheticEvent } from 'react'
 import './App.css'
 
 const API_BASE_URL = 'https://tsm-backend-hhao.onrender.com'
@@ -243,6 +243,11 @@ type Activity = {
   id: string
   name: string
   completed: boolean
+  isArchived: boolean
+  startDatetime: string | null
+  endDatetime: string | null
+  createdAt: string | null
+  updatedAt: string | null
 }
 
 type OperationalCost = {
@@ -265,6 +270,8 @@ type Site = {
   images: string[]
   notes: string
   isArchived: boolean
+  createdAt: string | null
+  updatedAt: string | null
   materials: Material[]
   activities: Activity[]
   operationalCosts: OperationalCost[]
@@ -293,6 +300,11 @@ type RawActivity = {
   _id?: string | number
   name?: unknown
   completed?: unknown
+  isArchived?: unknown
+  startDatetime?: unknown
+  endDatetime?: unknown
+  createdAt?: unknown
+  updatedAt?: unknown
 }
 
 type RawOperationalCost = {
@@ -317,13 +329,23 @@ type RawSite = {
   images?: unknown
   notes?: unknown
   isArchived?: unknown
+  createdAt?: unknown
+  updatedAt?: unknown
   materials?: RawMaterial[] | null
   activities?: RawActivity[] | null
   operationalCosts?: RawOperationalCost[] | null
 }
 
 type MainTab = 'about' | 'materials' | 'activities' | 'costs'
-type ModalType = 'site' | 'material' | 'activity' | 'operational-cost' | 'delete-site' | 'company-settings' | null
+type ModalType =
+  | 'site'
+  | 'material'
+  | 'activity'
+  | 'edit-activity'
+  | 'operational-cost'
+  | 'delete-site'
+  | 'company-settings'
+  | null
 type SiteModalMode = 'add' | 'edit'
 type MaterialMode = 'predefined' | 'custom'
 type ActivityMode = 'predefined' | 'custom'
@@ -331,11 +353,54 @@ type MaterialErrors = Partial<Record<'material' | 'customName' | 'quantity' | 'u
 type ActivityErrors = Partial<Record<'activity' | 'customName', boolean>>
 type OperationalCostErrors = Partial<Record<'name' | 'amount', boolean>>
 type CompanySettingsErrors = Partial<Record<'name' | 'email', boolean>>
+type SiteSortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'archived'
+type ActivitySortOption = 'newest' | 'start' | 'end' | 'name'
+type SiteViewLayout = 'grid' | 'list'
+
+type StatsPeriod = {
+  period: string
+  laborCost: number
+  materialsCost: number
+  operationalCost: number
+  total: number
+}
+
+type StatsResponse = {
+  totalSites: number
+  archivedSites: number
+  completedSites: number
+  completedPercentage: number
+  expenses: {
+    totalLaborCost: number
+    totalMaterialsCost: number
+    totalOperationalCost: number
+    totalExpenses: number
+    monthly: StatsPeriod[]
+    yearly: StatsPeriod[]
+  }
+}
+
+type ImportSkippedEntry = {
+  name: string
+  siteCode: string
+  reason: string
+}
+
+type ImportResult = {
+  message: string
+  importedCount: number
+  skippedCount: number
+  importedSiteIds: string[]
+  skipped: ImportSkippedEntry[]
+}
+
 type IconName =
   | 'arrow-left'
   | 'arrow-right'
+  | 'arrow-up-down'
   | 'archive'
   | 'archive-restore'
+  | 'bar-chart'
   | 'building'
   | 'check'
   | 'check-circle'
@@ -344,14 +409,17 @@ type IconName =
   | 'download'
   | 'edit'
   | 'file-text'
+  | 'grid'
   | 'image'
   | 'info'
+  | 'list'
   | 'map-pin'
   | 'plus'
   | 'search'
   | 'settings'
   | 'signal'
   | 'trash'
+  | 'upload'
 
 const siteTypeOptions = [
   { value: '4G', label: '4G' },
@@ -422,11 +490,21 @@ function normalizeMaterial(raw: RawMaterial): Material {
   }
 }
 
+function nullableText(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null
+  return typeof value === 'string' ? value : String(value)
+}
+
 function normalizeActivity(raw: RawActivity): Activity {
   return {
     id: recordId(raw),
     name: textValue(raw.name, 'Untitled activity'),
     completed: booleanValue(raw.completed),
+    isArchived: booleanValue(raw.isArchived),
+    startDatetime: nullableText(raw.startDatetime),
+    endDatetime: nullableText(raw.endDatetime),
+    createdAt: nullableText(raw.createdAt),
+    updatedAt: nullableText(raw.updatedAt),
   }
 }
 
@@ -619,6 +697,8 @@ function normalizeSite(raw: RawSite): Site {
     images: parseImages(raw.images),
     notes: textValue(raw.notes),
     isArchived: booleanValue(raw.isArchived),
+    createdAt: nullableText(raw.createdAt),
+    updatedAt: nullableText(raw.updatedAt),
     materials: Array.isArray(raw.materials) ? raw.materials.map(normalizeMaterial) : [],
     activities: Array.isArray(raw.activities) ? raw.activities.map(normalizeActivity) : [],
     operationalCosts: Array.isArray(raw.operationalCosts) ? raw.operationalCosts.map(normalizeOperationalCost) : [],
@@ -657,9 +737,68 @@ function formatCurrency(amount: number) {
   return `GHS ${amount.toFixed(2)}`
 }
 
-function csvEscape(value: string) {
-  const escaped = value.replaceAll('"', '""')
-  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped
+function pad2(value: number) {
+  return String(value).padStart(2, '0')
+}
+
+function todayDateInputValue(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+}
+
+function isoToDateInputValue(value: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+function isoToDatetimeLocalValue(value: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+function dateInputToIso(value: string): string | undefined {
+  if (!value) return undefined
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+function datetimeLocalToIso(value: string): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function formatDate(value: string | null): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+function formatActivityRange(start: string | null, end: string | null): string | null {
+  if (!start && !end) return null
+  if (start && end) return `${formatDateTime(start)} → ${formatDateTime(end)}`
+  if (start) return `Starts ${formatDateTime(start)}`
+  return `Ends ${formatDateTime(end as string)}`
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'))
+    reader.readAsText(file)
+  })
 }
 
 function buildErrorMessage(action: string, error: unknown) {
@@ -714,6 +853,35 @@ function Icon({ name }: { name: IconName }) {
           <path d="m12 5 7 7-7 7" />
         </svg>
       )
+    case 'arrow-up-down':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m21 16-4 4-4-4" />
+          <path d="M17 20V4" />
+          <path d="m3 8 4-4 4 4" />
+          <path d="M7 4v16" />
+        </svg>
+      )
+    case 'grid':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      )
+    case 'list':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <line x1="8" x2="21" y1="6" y2="6" />
+          <line x1="8" x2="21" y1="12" y2="12" />
+          <line x1="8" x2="21" y1="18" y2="18" />
+          <line x1="3" x2="3.01" y1="6" y2="6" />
+          <line x1="3" x2="3.01" y1="12" y2="12" />
+          <line x1="3" x2="3.01" y1="18" y2="18" />
+        </svg>
+      )
     case 'archive':
       return (
         <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -729,6 +897,22 @@ function Icon({ name }: { name: IconName }) {
           <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
           <path d="m9 15 3-3 3 3"></path>
           <path d="M12 12v9"></path>
+        </svg>
+      )
+    case 'bar-chart':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <line x1="12" x2="12" y1="20" y2="10" />
+          <line x1="18" x2="18" y1="20" y2="4" />
+          <line x1="6" x2="6" y1="20" y2="16" />
+        </svg>
+      )
+    case 'upload':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <path d="M17 8l-5-5-5 5" />
+          <path d="M12 3v12" />
         </svg>
       )
     case 'building':
@@ -876,11 +1060,122 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   )
 }
 
-function SiteCard({ site, onView }: { site: Site; onView: (siteId: string) => void }) {
+const LONG_PRESS_MS = 500
+
+function useLongPress(onLongPress: () => void) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const firedRef = useRef(false)
+
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  const start = () => {
+    firedRef.current = false
+    clearTimer()
+    timerRef.current = setTimeout(() => {
+      firedRef.current = true
+      onLongPress()
+    }, LONG_PRESS_MS)
+  }
+
+  return {
+    onTouchStart: start,
+    onTouchEnd: clearTimer,
+    onTouchMove: clearTimer,
+    onTouchCancel: clearTimer,
+    onContextMenu: (event: SyntheticEvent) => {
+      if (firedRef.current) event.preventDefault()
+    },
+    onClickCapture: (event: SyntheticEvent) => {
+      if (firedRef.current) {
+        event.preventDefault()
+        event.stopPropagation()
+        firedRef.current = false
+      }
+    },
+  }
+}
+
+function SiteCard({
+  site,
+  onView,
+  selectMode = false,
+  isSelected = false,
+  onToggleSelect,
+  onLongPress,
+  layout = 'grid',
+}: {
+  site: Site
+  onView: (siteId: string) => void
+  selectMode?: boolean
+  isSelected?: boolean
+  onToggleSelect?: (siteId: string) => void
+  onLongPress?: (siteId: string) => void
+  layout?: SiteViewLayout
+}) {
   const totals = calculateSiteTotals(site)
+  const createdLabel = formatDate(site.createdAt)
+  const longPressHandlers = useLongPress(() => onLongPress?.(site.id))
+  const pressHandlers = !selectMode && onLongPress ? longPressHandlers : {}
+
+  const selectCheckbox = selectMode ? (
+    <label className="site-card-select" onClick={(event) => event.stopPropagation()}>
+      <input
+        type="checkbox"
+        className="select-checkbox"
+        checked={isSelected}
+        onChange={() => onToggleSelect?.(site.id)}
+        aria-label={`Select ${site.name}`}
+      />
+    </label>
+  ) : null
+
+  if (layout === 'list') {
+    return (
+      <article className="site-card site-card-list">
+        {selectCheckbox}
+        <button
+          type="button"
+          className="site-list-row"
+          onClick={() => (selectMode ? onToggleSelect?.(site.id) : onView(site.id))}
+          {...pressHandlers}
+        >
+          <div className="site-icon">
+            <Icon name="building" />
+          </div>
+          <div className="site-list-main">
+            <div className="site-name-container" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <h3 className="site-name" style={{ margin: 0 }}>{site.name}</h3>
+              {site.siteType ? <span className="badge badge-site-type">{site.siteType}</span> : null}
+              {site.isArchived ? <span className="badge badge-archived">Archived</span> : null}
+            </div>
+            <p className="site-meta-line">
+              {site.region ? `${site.region} · ` : ''}{site.materials.length} materials / {site.activities.length} activities
+              {createdLabel ? ` · Created ${createdLabel}` : ''}
+            </p>
+          </div>
+          <div className="site-list-stats">
+            <div className="site-list-progress">
+              <div className="progress-bar" aria-label={`${totals.progress}% complete`}>
+                <div className="progress-fill" style={{ width: `${totals.progress}%` }} />
+              </div>
+              <span className="progress-value">{totals.progress}%</span>
+            </div>
+            <span className="site-list-total">{formatCurrency(totals.totalCost)}</span>
+          </div>
+          <Icon name="arrow-right" />
+        </button>
+      </article>
+    )
+  }
 
   return (
     <article className="site-card">
+      {selectCheckbox}
       <div className="site-card-content">
         <div className="site-card-header">
           <div className="site-icon-container">
@@ -896,6 +1191,7 @@ function SiteCard({ site, onView }: { site: Site; onView: (siteId: string) => vo
               <p className="site-meta-line">
                 {site.region ? `${site.region} · ` : ''}{site.materials.length} materials / {site.activities.length} activities
               </p>
+              {createdLabel ? <p className="site-meta-line">Created {createdLabel}</p> : null}
             </div>
           </div>
         </div>
@@ -930,12 +1226,96 @@ function SiteCard({ site, onView }: { site: Site; onView: (siteId: string) => vo
         </div>
       </div>
       <div className="site-card-footer">
-        <button type="button" className="view-details-btn" onClick={() => onView(site.id)}>
-          <span>View Details</span>
+        <button
+          type="button"
+          className="view-details-btn"
+          onClick={() => (selectMode ? onToggleSelect?.(site.id) : onView(site.id))}
+          {...pressHandlers}
+        >
+          <span>{selectMode ? (isSelected ? 'Selected' : 'Select') : 'View Details'}</span>
           <Icon name="arrow-right" />
         </button>
       </div>
     </article>
+  )
+}
+
+function ActivityListItem({
+  activity,
+  selectMode,
+  isSelected,
+  onToggleSelect,
+  onLongPress,
+  onToggleComplete,
+  onEdit,
+  onRemove,
+}: {
+  activity: Activity
+  selectMode: boolean
+  isSelected: boolean
+  onToggleSelect: (activityId: string) => void
+  onLongPress: (activityId: string) => void
+  onToggleComplete: (activity: Activity) => void
+  onEdit: (activity: Activity) => void
+  onRemove: (activityId: string) => void
+}) {
+  const rangeLabel = formatActivityRange(activity.startDatetime, activity.endDatetime)
+  const longPressHandlers = useLongPress(() => onLongPress(activity.id))
+  const pressHandlers = !selectMode ? longPressHandlers : {}
+
+  return (
+    <div className="list-item">
+      <div className="list-item-content" {...pressHandlers}>
+        {selectMode ? (
+          <input
+            type="checkbox"
+            className="select-checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(activity.id)}
+            aria-label={`Select ${activity.name}`}
+          />
+        ) : (
+          <button
+            type="button"
+            className={`list-item-checkbox ${activity.completed ? 'checked' : ''}`}
+            onClick={() => onToggleComplete(activity)}
+            aria-label={activity.completed ? 'Mark activity incomplete' : 'Mark activity complete'}
+            title={activity.completed ? 'Mark incomplete' : 'Mark complete'}
+          >
+            <Icon name={activity.completed ? 'check-circle' : 'circle'} />
+          </button>
+        )}
+        <div>
+          <h4 className={`list-item-title ${activity.completed ? 'completed' : ''}`}>
+            {activity.name}
+            {activity.isArchived ? (
+              <span className="badge badge-archived" style={{ marginLeft: '0.5rem' }}>Archived</span>
+            ) : null}
+          </h4>
+          {rangeLabel ? <p className="activity-datetime">{rangeLabel}</p> : null}
+        </div>
+      </div>
+      <div className="list-item-actions">
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => onEdit(activity)}
+          aria-label={`Edit ${activity.name}`}
+          title={`Edit ${activity.name}`}
+        >
+          <Icon name="edit" />
+        </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => onRemove(activity.id)}
+          aria-label={`Remove ${activity.name}`}
+          title={`Remove ${activity.name}`}
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -1007,6 +1387,59 @@ function App() {
   const [showArchived, setShowArchived] = useState(false)
   const [slideshowIndex, setSlideshowIndex] = useState(0)
   const [isSlideshowOpen, setIsSlideshowOpen] = useState(false)
+  const [infoMessage, setInfoMessage] = useState<string | null>(null)
+
+  // Site creation date (Add/Edit Site form)
+  const [siteFormCreatedAt, setSiteFormCreatedAt] = useState('')
+
+  // Sites dashboard: sorting + bulk select/archive + grid/list layout
+  const [siteSortOption, setSiteSortOption] = useState<SiteSortOption>('newest')
+  const [siteSelectMode, setSiteSelectMode] = useState(false)
+  const [selectedSiteIds, setSelectedSiteIds] = useState<Set<string>>(new Set())
+  const [siteViewLayout, setSiteViewLayout] = useState<SiteViewLayout>(() => {
+    if (typeof window === 'undefined') return 'grid'
+    return window.localStorage.getItem('site_view_layout') === 'list' ? 'list' : 'grid'
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('site_view_layout', siteViewLayout)
+  }, [siteViewLayout])
+
+  // Header: combined Import/Export dropdown menu
+  const [importExportMenuOpen, setImportExportMenuOpen] = useState(false)
+  const importExportMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!importExportMenuOpen) return
+    function handleClickOutside(event: MouseEvent) {
+      if (importExportMenuRef.current && !importExportMenuRef.current.contains(event.target as Node)) {
+        setImportExportMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [importExportMenuOpen])
+
+  // Activities: add/edit datetime fields, sorting, archive filter, bulk select/archive
+  const [activityStartDatetime, setActivityStartDatetime] = useState('')
+  const [activityEndDatetime, setActivityEndDatetime] = useState('')
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null)
+  const [editActivityName, setEditActivityName] = useState('')
+  const [editActivityStart, setEditActivityStart] = useState('')
+  const [editActivityEnd, setEditActivityEnd] = useState('')
+  const [activitySortOption, setActivitySortOption] = useState<ActivitySortOption>('newest')
+  const [showArchivedActivities, setShowArchivedActivities] = useState(false)
+  const [activitySelectMode, setActivitySelectMode] = useState(false)
+  const [selectedActivityIds, setSelectedActivityIds] = useState<Set<string>>(new Set())
+
+  // Top-level view mode (dashboard vs. stats) and stats data
+  const [viewMode, setViewMode] = useState<'dashboard' | 'stats'>('dashboard')
+  const [stats, setStats] = useState<StatsResponse | null>(null)
+  const [isStatsLoading, setIsStatsLoading] = useState(false)
+
+  // Full-fidelity JSON import
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   const handleLogin = (authUser: AuthUser) => {
     setUser(authUser)
@@ -1028,10 +1461,55 @@ function App() {
 
   const filteredSites = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase()
+    let base = normalizedSearch
+      ? sites.filter((site) => site.name.toLowerCase().includes(normalizedSearch))
+      : sites
 
-    if (!normalizedSearch) return sites
-    return sites.filter((site) => site.name.toLowerCase().includes(normalizedSearch))
-  }, [searchTerm, sites])
+    if (siteSortOption === 'archived') {
+      base = base.filter((site) => site.isArchived)
+    }
+
+    const sorted = [...base]
+    switch (siteSortOption) {
+      case 'oldest':
+        sorted.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))
+        break
+      case 'name-asc':
+        sorted.sort((a, b) => a.name.localeCompare(b.name))
+        break
+      case 'name-desc':
+        sorted.sort((a, b) => b.name.localeCompare(a.name))
+        break
+      case 'newest':
+      case 'archived':
+      default:
+        sorted.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+        break
+    }
+    return sorted
+  }, [searchTerm, sites, siteSortOption])
+
+  const visibleActivities = useMemo(() => {
+    if (!selectedSite) return []
+    const filtered = selectedSite.activities.filter((activity) => (showArchivedActivities ? true : !activity.isArchived))
+    const sorted = [...filtered]
+    switch (activitySortOption) {
+      case 'start':
+        sorted.sort((a, b) => (a.startDatetime ?? '').localeCompare(b.startDatetime ?? ''))
+        break
+      case 'end':
+        sorted.sort((a, b) => (a.endDatetime ?? '').localeCompare(b.endDatetime ?? ''))
+        break
+      case 'name':
+        sorted.sort((a, b) => a.name.localeCompare(b.name))
+        break
+      case 'newest':
+      default:
+        sorted.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+        break
+    }
+    return sorted
+  }, [selectedSite, showArchivedActivities, activitySortOption])
 
   const selectedSiteId = selectedSite?.id
   const selectedSiteLaborCost = selectedSite?.laborCost
@@ -1111,7 +1589,25 @@ function App() {
 
   function showDashboard() {
     setCurrentSiteId(null)
+    setViewMode('dashboard')
     setMainTab('about')
+  }
+
+  async function openStatsView() {
+    setCurrentSiteId(null)
+    setViewMode('stats')
+    setIsStatsLoading(true)
+    setErrorMessage(null)
+
+    try {
+      const data = await request<StatsResponse>('/sites/stats')
+      setStats(data)
+    } catch (error) {
+      setErrorMessage(buildErrorMessage('Failed to load stats', error))
+      console.error('Failed to load stats:', error)
+    } finally {
+      setIsStatsLoading(false)
+    }
   }
 
   function showSiteDetails(siteId: string) {
@@ -1132,6 +1628,7 @@ function App() {
     setSiteFormGoogleMapsUrl('')
     setSiteFormImages([''])
     setSiteFormNotes('')
+    setSiteFormCreatedAt(todayDateInputValue())
     setModal('site')
   }
 
@@ -1152,6 +1649,7 @@ function App() {
     setSiteFormGoogleMapsUrl(selectedSite.googleMapsUrl)
     setSiteFormImages(selectedSite.images.length > 0 ? [...selectedSite.images] : [''])
     setSiteFormNotes(selectedSite.notes)
+    setSiteFormCreatedAt(selectedSite.createdAt ? isoToDateInputValue(selectedSite.createdAt) : todayDateInputValue())
     setModal('site')
   }
 
@@ -1166,7 +1664,17 @@ function App() {
     setActivityMode('predefined')
     setActivityForm(emptyActivityForm)
     setActivityErrors({})
+    setActivityStartDatetime('')
+    setActivityEndDatetime('')
     setModal('activity')
+  }
+
+  function openEditActivityModal(activity: Activity) {
+    setEditingActivity(activity)
+    setEditActivityName(activity.name)
+    setEditActivityStart(isoToDatetimeLocalValue(activity.startDatetime))
+    setEditActivityEnd(isoToDatetimeLocalValue(activity.endDatetime))
+    setModal('edit-activity')
   }
 
   function openOperationalCostModal() {
@@ -1265,6 +1773,60 @@ function App() {
     }
   }
 
+  function toggleSiteSelectMode() {
+    setSiteSelectMode((current) => !current)
+    setSelectedSiteIds(new Set())
+  }
+
+  function toggleSiteSelected(siteId: string) {
+    setSelectedSiteIds((current) => {
+      const next = new Set(current)
+      if (next.has(siteId)) {
+        next.delete(siteId)
+      } else {
+        next.add(siteId)
+      }
+      return next
+    })
+  }
+
+  function handleSiteLongPress(siteId: string) {
+    setSiteSelectMode(true)
+    setSelectedSiteIds((current) => new Set(current).add(siteId))
+  }
+
+  async function bulkArchiveSites(archive: boolean) {
+    if (selectedSiteIds.size === 0) return
+
+    setIsSaving(true)
+    setErrorMessage(null)
+
+    try {
+      const ids = Array.from(selectedSiteIds)
+      const endpoint = archive ? '/sites/bulk-archive' : '/sites/bulk-unarchive'
+      await request<{ message: string; archivedIds?: string[]; unarchivedIds?: string[] }>(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(ids),
+      })
+
+      if (archive && !showArchived) {
+        setSites((currentSites) => currentSites.filter((site) => !selectedSiteIds.has(site.id)))
+      } else {
+        setSites((currentSites) =>
+          currentSites.map((site) => (selectedSiteIds.has(site.id) ? { ...site, isArchived: archive } : site)),
+        )
+      }
+      setSelectedSiteIds(new Set())
+      setSiteSelectMode(false)
+    } catch (error) {
+      const action = archive ? 'archive' : 'unarchive'
+      setErrorMessage(buildErrorMessage(`Failed to ${action} selected sites`, error))
+      console.error(`Failed to ${action} selected sites:`, error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   async function handleSiteSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -1293,6 +1855,7 @@ function App() {
       googleMapsUrl: resolvedGoogleMapsUrl || undefined,
       images: siteFormImages.length > 0 ? JSON.stringify(siteFormImages.map((url) => url.trim()).filter(Boolean)) : undefined,
       notes: siteFormNotes || undefined,
+      createdAt: dateInputToIso(siteFormCreatedAt),
     }
 
     try {
@@ -1453,19 +2016,34 @@ function App() {
     setActivityErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
 
+    const startDatetime = datetimeLocalToIso(activityStartDatetime)
+    const endDatetime = datetimeLocalToIso(activityEndDatetime)
+
     const activity: Activity = {
       id: generateId(),
       name: activityName,
       completed: false,
+      isArchived: false,
+      startDatetime,
+      endDatetime,
+      createdAt: null,
+      updatedAt: null,
     }
 
     setIsSaving(true)
     setErrorMessage(null)
 
     try {
+      const requestBody = {
+        id: activity.id,
+        name: activity.name,
+        completed: activity.completed,
+        ...(startDatetime ? { startDatetime } : {}),
+        ...(endDatetime ? { endDatetime } : {}),
+      }
       const savedActivity = await request<RawActivity | undefined>(`/sites/${selectedSite.id}/activities`, {
         method: 'POST',
-        body: JSON.stringify(activity),
+        body: JSON.stringify(requestBody),
       })
 
       updateSiteLocally(selectedSite.id, (site) => ({
@@ -1477,6 +2055,103 @@ function App() {
     } catch (error) {
       setErrorMessage(buildErrorMessage('Failed to add activity', error))
       console.error('Failed to add activity:', error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleEditActivitySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!selectedSite || !editingActivity) return
+
+    const trimmedName = editActivityName.trim()
+    if (!trimmedName) return
+
+    const startDatetime = datetimeLocalToIso(editActivityStart)
+    const endDatetime = datetimeLocalToIso(editActivityEnd)
+
+    setIsSaving(true)
+    setErrorMessage(null)
+
+    try {
+      const payload = { name: trimmedName, startDatetime, endDatetime }
+      const savedActivity = await request<RawActivity | undefined>(
+        `/sites/${selectedSite.id}/activities/${editingActivity.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        },
+      )
+
+      updateSiteLocally(selectedSite.id, (site) => ({
+        ...site,
+        activities: site.activities.map((activity) =>
+          activity.id === editingActivity.id
+            ? normalizeActivity({ ...activity, ...payload, ...(savedActivity ?? {}) })
+            : activity,
+        ),
+      }))
+      closeModal()
+      setEditingActivity(null)
+    } catch (error) {
+      setErrorMessage(buildErrorMessage('Failed to update activity', error))
+      console.error('Failed to update activity:', error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  function toggleActivitySelectMode() {
+    setActivitySelectMode((current) => !current)
+    setSelectedActivityIds(new Set())
+  }
+
+  function toggleActivitySelected(activityId: string) {
+    setSelectedActivityIds((current) => {
+      const next = new Set(current)
+      if (next.has(activityId)) {
+        next.delete(activityId)
+      } else {
+        next.add(activityId)
+      }
+      return next
+    })
+  }
+
+  function handleActivityLongPress(activityId: string) {
+    setActivitySelectMode(true)
+    setSelectedActivityIds((current) => new Set(current).add(activityId))
+  }
+
+  async function bulkArchiveActivities(archive: boolean) {
+    if (!selectedSite || selectedActivityIds.size === 0) return
+
+    setIsSaving(true)
+    setErrorMessage(null)
+
+    try {
+      const ids = Array.from(selectedActivityIds)
+      const endpoint = archive
+        ? `/sites/${selectedSite.id}/activities/bulk-archive`
+        : `/sites/${selectedSite.id}/activities/bulk-unarchive`
+      await request<{ message: string; archivedIds?: string[]; unarchivedIds?: string[] }>(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(ids),
+      })
+
+      updateSiteLocally(selectedSite.id, (site) => ({
+        ...site,
+        activities: site.activities.map((activity) =>
+          selectedActivityIds.has(activity.id) ? { ...activity, isArchived: archive } : activity,
+        ),
+      }))
+      setSelectedActivityIds(new Set())
+      setActivitySelectMode(false)
+    } catch (error) {
+      const action = archive ? 'archive' : 'unarchive'
+      setErrorMessage(buildErrorMessage(`Failed to ${action} selected activities`, error))
+      console.error(`Failed to ${action} selected activities:`, error)
     } finally {
       setIsSaving(false)
     }
@@ -1614,43 +2289,83 @@ function App() {
     }
   }
 
-  function exportData() {
-    const rows = [
-      [
-        'Site Name',
-        'Materials Count',
-        'Activities Count',
-        'Progress',
-        'Materials Cost',
-        'Labor Cost',
-        'Operational Costs Total',
-        'Total Cost',
-      ],
-      ...sites.map((site) => {
-        const totals = calculateSiteTotals(site)
-        return [
-          site.name,
-          String(site.materials.length),
-          String(site.activities.length),
-          `${totals.progress}%`,
-          formatCurrency(totals.materialCost),
-          formatCurrency(site.laborCost),
-          formatCurrency(totals.operationalCost),
-          formatCurrency(totals.totalCost),
-        ]
-      }),
-    ]
+  async function exportAllDataJson() {
+    setIsSaving(true)
+    setErrorMessage(null)
 
-    const csvContent = `\uFEFF${rows.map((row) => row.map(csvEscape).join(',')).join('\n')}`
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'telecom_sites_data.csv'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    try {
+      const exportPayload = await request<unknown>('/sites/export?include_archived=true')
+      const jsonContent = JSON.stringify(exportPayload, null, 2)
+      const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `telecom_sites_export_${todayDateInputValue()}.json`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setErrorMessage(buildErrorMessage('Failed to export data', error))
+      console.error('Failed to export data:', error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  function triggerImportFilePicker() {
+    importInputRef.current?.click()
+  }
+
+  async function handleImportFileSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setIsSaving(true)
+    setErrorMessage(null)
+    setInfoMessage(null)
+
+    try {
+      const text = await readFileAsText(file)
+
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        throw new Error('The selected file is not valid JSON.')
+      }
+
+      let sitesToImport: unknown[]
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { sites?: unknown }).sites)) {
+        sitesToImport = (parsed as { sites: unknown[] }).sites
+      } else if (Array.isArray(parsed)) {
+        sitesToImport = parsed
+      } else {
+        throw new Error('The selected file does not contain a recognizable "sites" array.')
+      }
+
+      const result = await request<ImportResult>('/sites/import', {
+        method: 'POST',
+        body: JSON.stringify({ sites: sitesToImport }),
+      })
+
+      const skippedSummary =
+        result.skipped && result.skipped.length > 0
+          ? ` Skipped: ${result.skipped
+              .map((entry) => `${entry.name || entry.siteCode || 'Unknown site'} (${entry.reason})`)
+              .join('; ')}`
+          : ''
+      setInfoMessage(`${result.message}.${skippedSummary}`)
+
+      const refreshedSites = await request<RawSite[]>(`/sites${showArchived ? '?include_archived=true' : ''}`)
+      setSites(refreshedSites.map(normalizeSite))
+    } catch (error) {
+      setErrorMessage(buildErrorMessage('Failed to import data', error))
+      console.error('Failed to import data:', error)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   // Show login page if not authenticated
@@ -1666,17 +2381,62 @@ function App() {
             {companySettings?.logoUrl ? <img src={companySettings.logoUrl} alt="Logo" className="company-logo" /> : null}
             <h1 className="app-title">{companySettings?.name || 'Telecom Site Manager'}</h1>
           </div>
-          <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <span className="user-info" style={{ fontSize: '0.85rem', color: 'var(--muted-foreground)', marginRight: '8px' }}>
               {user.username} ({user.role})
             </span>
             <button type="button" className="btn btn-icon" onClick={openCompanySettingsModal} aria-label="Settings" title="Settings">
               <Icon name="settings" />
             </button>
-            <button type="button" className="btn btn-outline" onClick={exportData}>
-              <Icon name="download" />
-              <span className="btn-text">Export Data</span>
+            <button type="button" className="btn btn-icon" onClick={openStatsView} aria-label="Stats" title="Stats">
+              <Icon name="bar-chart" />
             </button>
+            <div className="dropdown" ref={importExportMenuRef}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setImportExportMenuOpen((open) => !open)}
+                disabled={isSaving}
+                aria-haspopup="true"
+                aria-expanded={importExportMenuOpen}
+              >
+                <Icon name="arrow-up-down" />
+                <span className="btn-text">Import/Export</span>
+              </button>
+              {importExportMenuOpen ? (
+                <div className="dropdown-menu">
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => {
+                      setImportExportMenuOpen(false)
+                      exportAllDataJson()
+                    }}
+                  >
+                    <Icon name="download" />
+                    <span>Export (JSON)</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => {
+                      setImportExportMenuOpen(false)
+                      triggerImportFilePicker()
+                    }}
+                  >
+                    <Icon name="upload" />
+                    <span>Import (JSON)</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json"
+              style={{ display: 'none' }}
+              onChange={handleImportFileSelected}
+            />
             <button type="button" className="btn btn-ghost" onClick={handleLogout} style={{ marginLeft: '8px' }}>
               <Icon name="arrow-left" />
               <span className="btn-text">Logout</span>
@@ -1695,20 +2455,197 @@ function App() {
           </div>
         ) : null}
 
-        {!selectedSite ? (
+        {infoMessage ? (
+          <div className="alert alert-info" role="status">
+            <span>{infoMessage}</span>
+            <button type="button" className="btn btn-icon" onClick={() => setInfoMessage(null)} aria-label="Dismiss">
+              <Icon name="close" />
+            </button>
+          </div>
+        ) : null}
+
+        {!selectedSite && viewMode === 'stats' ? (
+          <section id="stats-view" className="view">
+            <div className="site-details-header">
+              <button type="button" className="btn btn-icon" onClick={showDashboard} aria-label="Back to sites" title="Back to sites">
+                <Icon name="arrow-left" />
+              </button>
+              <div className="site-info">
+                <h2 className="site-title">Site Stats</h2>
+              </div>
+            </div>
+
+            {isStatsLoading ? (
+              <EmptyPanel title="Loading stats" text="Crunching the numbers." icon="bar-chart" />
+            ) : stats ? (
+              <>
+                <div className="stats-grid">
+                  <div className="stat-tile">
+                    <div className="stat-tile-label">Total Sites</div>
+                    <div className="stat-tile-value">{stats.totalSites}</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-tile-label">Archived Sites</div>
+                    <div className="stat-tile-value">{stats.archivedSites}</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-tile-label">Completed Sites</div>
+                    <div className="stat-tile-value">{stats.completedSites}</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-tile-label">Completed %</div>
+                    <div className="stat-tile-value">{stats.completedPercentage.toFixed(1)}%</div>
+                  </div>
+                </div>
+
+                <div className="cost-summary-cards">
+                  <div className="card cost-card">
+                    <div className="card-header">
+                      <h3 className="card-title">Total Labor Cost</h3>
+                    </div>
+                    <div className="card-content">
+                      <div className="cost-amount">{formatCurrency(stats.expenses.totalLaborCost)}</div>
+                    </div>
+                  </div>
+                  <div className="card cost-card">
+                    <div className="card-header">
+                      <h3 className="card-title">Total Materials Cost</h3>
+                    </div>
+                    <div className="card-content">
+                      <div className="cost-amount">{formatCurrency(stats.expenses.totalMaterialsCost)}</div>
+                    </div>
+                  </div>
+                  <div className="card cost-card">
+                    <div className="card-header">
+                      <h3 className="card-title">Total Operational Cost</h3>
+                    </div>
+                    <div className="card-content">
+                      <div className="cost-amount">{formatCurrency(stats.expenses.totalOperationalCost)}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="card mt-4" style={{ marginBottom: '1.5rem' }}>
+                  <div className="card-header">
+                    <h3 className="card-title">Monthly Expenses</h3>
+                  </div>
+                  <div className="card-content" style={{ overflowX: 'auto' }}>
+                    {stats.expenses.monthly.length === 0 ? (
+                      <p className="cost-meta">No monthly expense data yet.</p>
+                    ) : (
+                      <table className="stats-table">
+                        <thead>
+                          <tr>
+                            <th>Period</th>
+                            <th>Labor</th>
+                            <th>Materials</th>
+                            <th>Operational</th>
+                            <th>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.expenses.monthly.map((row) => {
+                            const maxTotal = Math.max(...stats.expenses.monthly.map((r) => r.total), 1)
+                            return (
+                              <tr key={row.period}>
+                                <td>{row.period}</td>
+                                <td>{formatCurrency(row.laborCost)}</td>
+                                <td>{formatCurrency(row.materialsCost)}</td>
+                                <td>{formatCurrency(row.operationalCost)}</td>
+                                <td>
+                                  {formatCurrency(row.total)}
+                                  <div className="stats-bar-track" style={{ marginTop: '0.35rem' }}>
+                                    <div className="stats-bar-fill" style={{ width: `${(row.total / maxTotal) * 100}%` }} />
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-header">
+                    <h3 className="card-title">Yearly Expenses</h3>
+                  </div>
+                  <div className="card-content" style={{ overflowX: 'auto' }}>
+                    {stats.expenses.yearly.length === 0 ? (
+                      <p className="cost-meta">No yearly expense data yet.</p>
+                    ) : (
+                      <table className="stats-table">
+                        <thead>
+                          <tr>
+                            <th>Period</th>
+                            <th>Labor</th>
+                            <th>Materials</th>
+                            <th>Operational</th>
+                            <th>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.expenses.yearly.map((row) => {
+                            const maxTotal = Math.max(...stats.expenses.yearly.map((r) => r.total), 1)
+                            return (
+                              <tr key={row.period}>
+                                <td>{row.period}</td>
+                                <td>{formatCurrency(row.laborCost)}</td>
+                                <td>{formatCurrency(row.materialsCost)}</td>
+                                <td>{formatCurrency(row.operationalCost)}</td>
+                                <td>
+                                  {formatCurrency(row.total)}
+                                  <div className="stats-bar-track" style={{ marginTop: '0.35rem' }}>
+                                    <div className="stats-bar-fill" style={{ width: `${(row.total / maxTotal) * 100}%` }} />
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <EmptyPanel title="No stats available" text="Stats could not be loaded." icon="bar-chart" />
+            )}
+          </section>
+        ) : !selectedSite ? (
           <section id="dashboard-view" className="view">
             <div className="dashboard-header">
               <h2 className="section-title">Sites</h2>
               <div className="dashboard-actions">
                 <label className="toggle-switch">
-                  <input 
-                    type="checkbox" 
-                    checked={showArchived} 
-                    onChange={(e) => setShowArchived(e.target.checked)} 
+                  <input
+                    type="checkbox"
+                    checked={showArchived}
+                    onChange={(e) => setShowArchived(e.target.checked)}
                   />
                   <span className="toggle-slider"></span>
                   <span className="toggle-label" style={{ marginLeft: '8px', fontSize: '0.9rem' }}>Show Archived</span>
                 </label>
+                <select
+                  className="select"
+                  style={{ width: 'auto' }}
+                  value={siteSortOption}
+                  onChange={(event) => {
+                    const nextOption = event.target.value as SiteSortOption
+                    setSiteSortOption(nextOption)
+                    if (nextOption === 'archived') {
+                      setShowArchived(true)
+                    }
+                  }}
+                  aria-label="Sort sites"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                  <option value="name-asc">Name (A–Z)</option>
+                  <option value="name-desc">Name (Z–A)</option>
+                  <option value="archived">Archived</option>
+                </select>
                 <div className="search-container">
                   <Icon name="search" />
                   <input
@@ -1719,6 +2656,36 @@ function App() {
                     onChange={(event) => setSearchTerm(event.target.value)}
                   />
                 </div>
+                <div className="view-toggle" role="group" aria-label="Site view layout">
+                  <button
+                    type="button"
+                    className={`view-toggle-btn${siteViewLayout === 'grid' ? ' active' : ''}`}
+                    onClick={() => setSiteViewLayout('grid')}
+                    aria-pressed={siteViewLayout === 'grid'}
+                    aria-label="Grid view"
+                    title="Grid view"
+                  >
+                    <Icon name="grid" />
+                  </button>
+                  <button
+                    type="button"
+                    className={`view-toggle-btn${siteViewLayout === 'list' ? ' active' : ''}`}
+                    onClick={() => setSiteViewLayout('list')}
+                    aria-pressed={siteViewLayout === 'list'}
+                    aria-label="List view"
+                    title="List view"
+                  >
+                    <Icon name="list" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={`btn btn-outline select-mode-btn${siteSelectMode ? ' is-active' : ''}`}
+                  onClick={toggleSiteSelectMode}
+                >
+                  <Icon name="check-circle" />
+                  <span className="btn-text">{siteSelectMode ? 'Cancel' : 'Select'}</span>
+                </button>
                 <button type="button" className="btn btn-primary" onClick={openAddSiteModal}>
                   <Icon name="plus" />
                   <span className="btn-text">Add Site</span>
@@ -1726,7 +2693,26 @@ function App() {
               </div>
             </div>
 
-            <div className="sites-grid">
+            {siteSelectMode && selectedSiteIds.size > 0 ? (
+              <div className="bulk-action-bar">
+                <span>{selectedSiteIds.size} selected</span>
+                <div className="bulk-action-bar-actions">
+                  {showArchived ? (
+                    <button type="button" className="btn btn-outline" onClick={() => bulkArchiveSites(false)} disabled={isSaving}>
+                      <Icon name="archive-restore" />
+                      <span>Unarchive Selected ({selectedSiteIds.size})</span>
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn-outline" onClick={() => bulkArchiveSites(true)} disabled={isSaving}>
+                      <Icon name="archive" />
+                      <span>Archive Selected ({selectedSiteIds.size})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            <div className={`sites-grid${siteViewLayout === 'list' ? ' sites-list' : ''}`}>
               {isLoading ? (
                 <EmptyPanel title="Loading sites" text="Fetching the latest project data." />
               ) : filteredSites.length === 0 ? (
@@ -1737,7 +2723,18 @@ function App() {
                   onAction={searchTerm.trim() ? undefined : openAddSiteModal}
                 />
               ) : (
-                filteredSites.map((site) => <SiteCard key={site.id} site={site} onView={showSiteDetails} />)
+                filteredSites.map((site) => (
+                  <SiteCard
+                    key={site.id}
+                    site={site}
+                    onView={showSiteDetails}
+                    selectMode={siteSelectMode}
+                    isSelected={selectedSiteIds.has(site.id)}
+                    onToggleSelect={toggleSiteSelected}
+                    onLongPress={handleSiteLongPress}
+                    layout={siteViewLayout}
+                  />
+                ))
               )}
             </div>
           </section>
@@ -1870,6 +2867,11 @@ function App() {
                       <span className="about-label">Location</span>
                       <div className="about-value">{selectedSite.location || <span className="text-light">Not set</span>}</div>
                     </div>
+
+                    <div className="about-field">
+                      <span className="about-label">Created</span>
+                      <div className="about-value">{formatDate(selectedSite.createdAt) || <span className="text-light">Not set</span>}</div>
+                    </div>
                   </div>
 
                   {(selectedSite.latitude !== null && selectedSite.longitude !== null) ? (
@@ -1995,8 +2997,60 @@ function App() {
                       <span>Add Activity</span>
                     </button>
                   </div>
+
+                  <div className="dashboard-actions" style={{ marginBottom: '1rem' }}>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={showArchivedActivities}
+                        onChange={(event) => setShowArchivedActivities(event.target.checked)}
+                      />
+                      <span className="toggle-slider"></span>
+                      <span className="toggle-label" style={{ marginLeft: '8px', fontSize: '0.9rem' }}>Show Archived</span>
+                    </label>
+                    <select
+                      className="select"
+                      style={{ width: 'auto' }}
+                      value={activitySortOption}
+                      onChange={(event) => setActivitySortOption(event.target.value as ActivitySortOption)}
+                      aria-label="Sort activities"
+                    >
+                      <option value="newest">Newest created</option>
+                      <option value="start">Start date</option>
+                      <option value="end">End date</option>
+                      <option value="name">Name</option>
+                    </select>
+                    <button
+                      type="button"
+                      className={`btn btn-outline select-mode-btn${activitySelectMode ? ' is-active' : ''}`}
+                      onClick={toggleActivitySelectMode}
+                    >
+                      <Icon name="check-circle" />
+                      <span className="btn-text">{activitySelectMode ? 'Cancel' : 'Select'}</span>
+                    </button>
+                  </div>
+
+                  {activitySelectMode && selectedActivityIds.size > 0 ? (
+                    <div className="bulk-action-bar">
+                      <span>{selectedActivityIds.size} selected</span>
+                      <div className="bulk-action-bar-actions">
+                        {showArchivedActivities ? (
+                          <button type="button" className="btn btn-outline" onClick={() => bulkArchiveActivities(false)} disabled={isSaving}>
+                            <Icon name="archive-restore" />
+                            <span>Unarchive Selected ({selectedActivityIds.size})</span>
+                          </button>
+                        ) : (
+                          <button type="button" className="btn btn-outline" onClick={() => bulkArchiveActivities(true)} disabled={isSaving}>
+                            <Icon name="archive" />
+                            <span>Archive Selected ({selectedActivityIds.size})</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="list-container">
-                    {selectedSite.activities.length === 0 ? (
+                    {visibleActivities.length === 0 ? (
                       <EmptyPanel
                         title="No activities added yet"
                         text="Add work activities to measure site progress."
@@ -2005,30 +3059,18 @@ function App() {
                         icon="check-circle"
                       />
                     ) : (
-                      selectedSite.activities.map((activity) => (
-                        <div className="list-item" key={activity.id}>
-                          <div className="list-item-content">
-                            <button
-                              type="button"
-                              className={`list-item-checkbox ${activity.completed ? 'checked' : ''}`}
-                              onClick={() => toggleActivity(activity)}
-                              aria-label={activity.completed ? 'Mark activity incomplete' : 'Mark activity complete'}
-                              title={activity.completed ? 'Mark incomplete' : 'Mark complete'}
-                            >
-                              <Icon name={activity.completed ? 'check-circle' : 'circle'} />
-                            </button>
-                            <h4 className={`list-item-title ${activity.completed ? 'completed' : ''}`}>{activity.name}</h4>
-                          </div>
-                          <button
-                            type="button"
-                            className="btn btn-icon"
-                            onClick={() => removeActivity(activity.id)}
-                            aria-label={`Remove ${activity.name}`}
-                            title={`Remove ${activity.name}`}
-                          >
-                            <Icon name="trash" />
-                          </button>
-                        </div>
+                      visibleActivities.map((activity) => (
+                        <ActivityListItem
+                          key={activity.id}
+                          activity={activity}
+                          selectMode={activitySelectMode}
+                          isSelected={selectedActivityIds.has(activity.id)}
+                          onToggleSelect={toggleActivitySelected}
+                          onLongPress={handleActivityLongPress}
+                          onToggleComplete={toggleActivity}
+                          onEdit={openEditActivityModal}
+                          onRemove={removeActivity}
+                        />
                       ))
                     )}
                   </div>
@@ -2185,6 +3227,17 @@ function App() {
                 placeholder="e.g. Adum, Kumasi"
                 value={siteFormLocation}
                 onChange={(event) => setSiteFormLocation(event.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="site-created-at-input">Creation Date</label>
+              <input
+                type="date"
+                id="site-created-at-input"
+                className="input"
+                value={siteFormCreatedAt}
+                onChange={(event) => setSiteFormCreatedAt(event.target.value)}
               />
             </div>
 
@@ -2465,6 +3518,29 @@ function App() {
               </div>
             )}
 
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="activity-start-input">Start (optional)</label>
+                <input
+                  type="datetime-local"
+                  id="activity-start-input"
+                  className="input"
+                  value={activityStartDatetime}
+                  onChange={(event) => setActivityStartDatetime(event.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="activity-end-input">End (optional)</label>
+                <input
+                  type="datetime-local"
+                  id="activity-end-input"
+                  className="input"
+                  value={activityEndDatetime}
+                  onChange={(event) => setActivityEndDatetime(event.target.value)}
+                />
+              </div>
+            </div>
+
             <div className="modal-footer">
               <button type="button" className="btn btn-outline" onClick={closeModal}>
                 Cancel
@@ -2472,6 +3548,57 @@ function App() {
               <button type="submit" className="btn btn-primary" disabled={isSaving}>
                 <Icon name="plus" />
                 <span>Add Activity</span>
+              </button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
+
+      {modal === 'edit-activity' && editingActivity ? (
+        <Modal title="Edit Activity" onClose={closeModal}>
+          <form className="modal-form" onSubmit={handleEditActivitySubmit}>
+            <div className="form-group">
+              <label htmlFor="edit-activity-name-input">Activity Name</label>
+              <input
+                type="text"
+                id="edit-activity-name-input"
+                className="input"
+                value={editActivityName}
+                onChange={(event) => setEditActivityName(event.target.value)}
+                autoFocus
+              />
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="edit-activity-start-input">Start (optional)</label>
+                <input
+                  type="datetime-local"
+                  id="edit-activity-start-input"
+                  className="input"
+                  value={editActivityStart}
+                  onChange={(event) => setEditActivityStart(event.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="edit-activity-end-input">End (optional)</label>
+                <input
+                  type="datetime-local"
+                  id="edit-activity-end-input"
+                  className="input"
+                  value={editActivityEnd}
+                  onChange={(event) => setEditActivityEnd(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" className="btn btn-outline" onClick={closeModal}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                <Icon name="check" />
+                <span>Save</span>
               </button>
             </div>
           </form>

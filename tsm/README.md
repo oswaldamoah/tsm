@@ -18,6 +18,7 @@ The whole app is intentionally a single file: `src/App.tsx` holds every type, AP
 - **Company branding** — logo, name, and contact info shown in the header, editable via Settings.
 - **Auth** — JWT login against the backend; role (`admin`/`manager`) shown in the header.
 - **Mobile-first responsive UI** — the header packs the logo, title, and action icons onto a couple of tight rows instead of spreading across many; layouts stack cleanly at phone widths.
+- **AI assistant** — a floating button opens a chat panel that answers questions about your live data ("which region costs the most?"), renders charts inline, and builds slide decks you can page through and download as PowerPoint. Requires the backend's AI endpoints to be configured; if they aren't, the panel says so and stays out of the way.
 
 ## Getting started
 
@@ -33,6 +34,16 @@ npm run build      # tsc -b && vite build — type-checks then builds to dist/
 npm run preview     # serve the production build locally
 npm run lint         # oxlint
 ```
+
+## Previewing against a local backend
+
+`API_BASE_URL` defaults to the deployed Render backend, so `npm run dev` talks to production out of the box. To point it at a backend running on your own machine, create `tsm/.env.local` (gitignored):
+
+```
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+Restart `npm run dev` after changing it. Delete the file to go back to the deployed backend.
 
 ## Connecting to a backend
 
@@ -50,10 +61,14 @@ Default backend credentials (see the backend README) are `admin` / `admin123` an
 
 ```
 src/
-  App.tsx    # types, API client (request<T>()), all views/modals, all components
-  App.css    # all styling
-  main.tsx    # ReactDOM entry point
-  index.css   # global reset
+  App.tsx           # types, API client (request<T>()), all views/modals, all components
+  App.css           # all styling
+  AiAssistant.tsx   # AI chat panel, chart rendering, deck viewer
+  AiAssistant.css   # styling for the above
+  main.tsx          # ReactDOM entry point
+  index.css         # global reset
 ```
 
 There's no `src/api/`, `src/components/`, or `src/pages/` — new features are added directly to `App.tsx`/`App.css` following the existing patterns (a `RawX`/`normalizeX()` pair for API responses that tolerate missing fields, and the `request<T>(path, options)` helper for every network call).
+
+The AI assistant is the one exception: it lives in its own module because it pulls in `recharts`, and `App.tsx` loads it with `React.lazy` so the charting library ships as a separate chunk instead of weighing down first paint. It mounts once at the bottom of the app shell and manages its own open/closed state.

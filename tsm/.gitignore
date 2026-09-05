@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local env overrides (e.g. VITE_API_BASE_URL for pointing at a local backend)
+.env
+.env.local
+.env.*.local

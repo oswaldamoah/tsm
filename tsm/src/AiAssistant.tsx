@@ -98,6 +98,11 @@ const authHeaders = (): Record<string, string> => {
 }
 
 const readError = async (res: Response, fallback: string): Promise<string> => {
+  // A rejected token is the one failure the raw server message explains badly
+  // ("Could not validate credentials"), so name the actual fix instead.
+  if (res.status === 401 || res.status === 403) {
+    return 'Your session has expired. Log out and back in, then try again.'
+  }
   try {
     const body = await res.json()
     if (typeof body?.detail === 'string') return body.detail
@@ -105,6 +110,20 @@ const readError = async (res: Response, fallback: string): Promise<string> => {
     // non-JSON error body; fall through
   }
   return fallback
+}
+
+// fetch() rejects with a bare "Failed to fetch" when it cannot reach the server
+// at all - wrong address, server down, or an https page calling http. That text
+// tells a user nothing, so translate it into something they can act on.
+const describeNetworkFailure = (apiBaseUrl: string): string => {
+  const pageIsHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+  if (pageIsHttps && apiBaseUrl.startsWith('http://')) {
+    return (
+      `This page is served over HTTPS but the API address is ${apiBaseUrl}, which the browser ` +
+      `blocks as insecure. The site was most likely built with a local VITE_API_BASE_URL baked in.`
+    )
+  }
+  return `Could not reach the server at ${apiBaseUrl}. Check that it is running and reachable from this device.`
 }
 
 // ============ MARKDOWN-LITE ============
@@ -563,7 +582,15 @@ export default function AiAssistant({ apiBaseUrl }: { apiBaseUrl: string }) {
         )
       } catch (error) {
         if (!cancelled) {
-          setStatus({ state: 'unavailable', reason: error instanceof Error ? error.message : 'Assistant is unavailable' })
+          const unreachable = error instanceof TypeError // fetch's "Failed to fetch"
+          setStatus({
+            state: 'unavailable',
+            reason: unreachable
+              ? describeNetworkFailure(apiBaseUrl)
+              : error instanceof Error
+                ? error.message
+                : 'Assistant is unavailable',
+          })
         }
       }
     }
@@ -629,9 +656,11 @@ export default function AiAssistant({ apiBaseUrl }: { apiBaseUrl: string }) {
           role: 'assistant',
           content: timedOut
             ? 'That took too long to come back. The server may be waking up from idle - try asking again.'
-            : error instanceof Error
-              ? error.message
-              : 'Something went wrong.',
+            : error instanceof TypeError // fetch could not reach the server at all
+              ? describeNetworkFailure(apiBaseUrl)
+              : error instanceof Error
+                ? error.message
+                : 'Something went wrong.',
           isError: true,
         },
       ])

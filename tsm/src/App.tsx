@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode, SyntheticEvent } from 'react'
 import './App.css'
 
-const API_BASE_URL = 'https://tsm-backend-hhao.onrender.com'
+// Loaded as its own chunk - it pulls in the charting library, which should not
+// sit on the critical path for the main app.
+const AiAssistant = lazy(() => import('./AiAssistant'))
+
+// Defaults to the deployed backend. Point it somewhere else for local work by
+// putting VITE_API_BASE_URL=http://127.0.0.1:8000 in a .env.local file.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'https://tsm-backend-hhao.onrender.com'
 
 // ============ AUTH TYPES & HELPERS ============
 
@@ -3788,6 +3794,10 @@ function App() {
           </div>
         </div>
       ) : null}
+
+      <Suspense fallback={null}>
+        <AiAssistant apiBaseUrl={API_BASE_URL} />
+      </Suspense>
     </div>
   )
 }

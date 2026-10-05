@@ -1,198 +1,46 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, ReactNode, SyntheticEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, FormEvent, ReactNode, SyntheticEvent } from 'react'
 import './App.css'
+import {
+  API_BASE_URL,
+  UNAUTHORIZED_EVENT,
+  clearCache,
+  clearSession,
+  getStoredAuth,
+  readCache,
+  request,
+  warmUpServer,
+  writeCache,
+} from './api'
+import type { AuthUser } from './api'
+import { AuthScreen } from './Auth'
+import { FIBER_COLORS } from './fiber'
 
 // Loaded as its own chunk - it pulls in the charting library, which should not
 // sit on the critical path for the main app.
 const AiAssistant = lazy(() => import('./AiAssistant'))
 
-// Defaults to the deployed backend. Point it somewhere else for local work by
-// putting VITE_API_BASE_URL=http://127.0.0.1:8000 in a .env.local file.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'https://tsm-backend-hhao.onrender.com'
+type ThemePreference = 'system' | 'light' | 'dark'
 
-// ============ AUTH TYPES & HELPERS ============
-
-type AuthUser = {
-  username: string
-  role: 'admin' | 'manager'
-}
-
-type LoginCredentials = {
-  username: string
-  password: string
-}
-
-type LoginResponse = {
-  access_token: string
-  token_type: string
-  username: string
-  role: 'admin' | 'manager'
-}
-
-const AUTH_STORAGE_KEYS = {
-  TOKEN: 'auth_token',
-  USERNAME: 'auth_username',
-  ROLE: 'auth_role',
-} as const
-
-const getStoredAuth = (): AuthUser | null => {
-  if (typeof window === 'undefined') return null
-  const token = localStorage.getItem(AUTH_STORAGE_KEYS.TOKEN)
-  const username = localStorage.getItem(AUTH_STORAGE_KEYS.USERNAME)
-  const role = localStorage.getItem(AUTH_STORAGE_KEYS.ROLE)
-
-  if (!token || !username || !role) return null
-
-  if (role !== 'admin' && role !== 'manager') return null
-
-  return { username, role }
-}
-
-const setStoredAuth = (data: LoginResponse) => {
-  localStorage.setItem(AUTH_STORAGE_KEYS.TOKEN, data.access_token)
-  localStorage.setItem(AUTH_STORAGE_KEYS.USERNAME, data.username)
-  localStorage.setItem(AUTH_STORAGE_KEYS.ROLE, data.role)
-}
-
-const clearStoredAuth = () => {
-  localStorage.removeItem(AUTH_STORAGE_KEYS.TOKEN)
-  localStorage.removeItem(AUTH_STORAGE_KEYS.USERNAME)
-  localStorage.removeItem(AUTH_STORAGE_KEYS.ROLE)
-}
-
-const loginUser = async (credentials: LoginCredentials): Promise<LoginResponse> => {
-  const res = await fetch(`${API_BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(credentials),
-  })
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Login failed' }))
-    throw new Error(err.detail || 'Invalid credentials')
+function readThemePreference(): ThemePreference {
+  try {
+    const value = localStorage.getItem('tsm_theme')
+    return value === 'light' || value === 'dark' ? value : 'system'
+  } catch {
+    return 'system'
   }
-
-  return res.json()
 }
 
-// ============ LOGIN PAGE COMPONENT ============
-
-const LoginPage = ({ onLogin }: { onLogin: (user: AuthUser) => void }) => {
-  const [form, setForm] = useState<LoginCredentials>({ username: '', password: '' })
-  const [errors, setErrors] = useState<Partial<Record<keyof LoginCredentials, boolean>>>({})
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-
-  const validateForm = () => {
-    const newErrors: Partial<Record<keyof LoginCredentials, boolean>> = {}
-    if (!form.username.trim()) newErrors.username = true
-    if (!form.password.trim()) newErrors.password = true
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
+function applyThemePreference(theme: ThemePreference) {
+  const root = document.documentElement
+  if (theme === 'system') root.removeAttribute('data-theme')
+  else root.setAttribute('data-theme', theme)
+  try {
+    if (theme === 'system') localStorage.removeItem('tsm_theme')
+    else localStorage.setItem('tsm_theme', theme)
+  } catch {
+    // ignore
   }
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!validateForm()) return
-
-    setIsLoading(true)
-    setErrorMessage(null)
-
-    try {
-      const data = await loginUser(form)
-      setStoredAuth(data)
-      onLogin({ username: data.username, role: data.role })
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Login failed')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setForm((prev) => ({ ...prev, [name]: value }))
-    if (errors[name as keyof LoginCredentials]) {
-      setErrors((prev) => ({ ...prev, [name]: false }))
-    }
-  }
-
-  return (
-    <div className="login-page">
-      <div className="login-card">
-        <div className="login-header">
-          <div className="login-logo">
-            <img src="/favicon.png" alt="Telecom Site Manager" className="login-icon" />
-          </div>
-          <div className="login-text">
-            <h1 className="login-title">Telecom Site Manager</h1>
-            <p className="login-subtitle">Sign in to manage your sites</p>
-          </div>
-        </div>
-
-        {errorMessage && (
-          <div className="login-error" role="alert">
-            <Icon name="info" />
-            <span>{errorMessage}</span>
-          </div>
-        )}
-
-        <form className="login-form" onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="username">Username</label>
-            <input
-              type="text"
-              id="username"
-              name="username"
-              className={`input ${errors.username ? 'invalid' : ''}`}
-              value={form.username}
-              onChange={handleChange}
-              placeholder="Enter username"
-              disabled={isLoading}
-              autoComplete="username"
-              autoFocus
-            />
-            {errors.username && <p className="input-error">Username is required</p>}
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              className={`input ${errors.password ? 'invalid' : ''}`}
-              value={form.password}
-              onChange={handleChange}
-              placeholder="Enter password"
-              disabled={isLoading}
-              autoComplete="current-password"
-            />
-            {errors.password && <p className="input-error">Password is required</p>}
-          </div>
-
-          <button type="submit" className="btn btn-primary btn-block" disabled={isLoading}>
-            {isLoading ? (
-              <>
-                <span className="spinner" />
-                <span>Signing in...</span>
-              </>
-            ) : (
-              'Sign In'
-            )}
-          </button>
-        </form>
-
-        <div className="login-footer">
-          <p className="login-hint">
-            Default credentials:
-            <code>admin / admin123</code>
-            <code>manager / manager123</code>
-          </p>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 const predefinedMaterials = [
@@ -359,7 +207,8 @@ type MaterialErrors = Partial<Record<'material' | 'customName' | 'quantity' | 'u
 type ActivityErrors = Partial<Record<'activity' | 'customName', boolean>>
 type OperationalCostErrors = Partial<Record<'name' | 'amount', boolean>>
 type CompanySettingsErrors = Partial<Record<'name' | 'email', boolean>>
-type SiteSortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'archived'
+type SiteSortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'cost-desc' | 'progress-asc'
+type SiteFilter = 'active' | 'archived' | 'all'
 type ActivitySortOption = 'newest' | 'start' | 'end' | 'name'
 type SiteViewLayout = 'grid' | 'list'
 
@@ -426,6 +275,10 @@ type IconName =
   | 'signal'
   | 'trash'
   | 'upload'
+  | 'log-out'
+  | 'sun'
+  | 'moon'
+  | 'monitor'
 
 const siteTypeOptions = [
   { value: '4G', label: '4G' },
@@ -739,8 +592,115 @@ function calculateSiteTotals(site: Site) {
   }
 }
 
+const amountFormatter = new Intl.NumberFormat('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+function formatAmount(amount: number) {
+  return amountFormatter.format(Number.isFinite(amount) ? amount : 0)
+}
+
 function formatCurrency(amount: number) {
-  return `GHS ${amount.toFixed(2)}`
+  return `GHS ${formatAmount(amount)}`
+}
+
+function CostFigure({ amount }: { amount: number }) {
+  return (
+    <span className="cost-figure">
+      <span className="currency">GHS</span>
+      {formatAmount(amount)}
+    </span>
+  )
+}
+
+// Site types take their colour from the fibre-optic strand colour code.
+const SITE_TYPE_STRANDS: Record<string, number> = {
+  '4g': 0, // blue
+  '5g': 9, // violet
+  fiber: 1, // orange
+  fibre: 1,
+  microwave: 2, // green
+  satellite: 11, // aqua
+  other: 4, // slate
+}
+
+function strandColor(siteType: string): string | undefined {
+  const key = siteType.trim().toLowerCase()
+  if (!key) return undefined
+  if (key in SITE_TYPE_STRANDS) return FIBER_COLORS[SITE_TYPE_STRANDS[key]]
+  let hash = 0
+  for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return FIBER_COLORS[hash % FIBER_COLORS.length]
+}
+
+function strandStyle(siteType: string): CSSProperties | undefined {
+  const color = strandColor(siteType)
+  return color ? ({ '--strand': color } as CSSProperties) : undefined
+}
+
+// Same numbers the backend's /sites/stats returns, computed from data we
+// already have so the stats view opens instantly.
+function computeStats(allSites: Site[]): StatsResponse {
+  const sites = allSites.filter((site) => !site.isArchived)
+  const archivedSites = allSites.length - sites.length
+  let completedSites = 0
+  let totalLabor = 0
+  let totalMaterials = 0
+  let totalOperational = 0
+  const monthly = new Map<string, StatsPeriod>()
+  const yearly = new Map<string, StatsPeriod>()
+
+  const bucket = (store: Map<string, StatsPeriod>, key: string) => {
+    let row = store.get(key)
+    if (!row) {
+      row = { period: key, laborCost: 0, materialsCost: 0, operationalCost: 0, total: 0 }
+      store.set(key, row)
+    }
+    return row
+  }
+
+  for (const site of sites) {
+    const active = site.activities.filter((activity) => !activity.isArchived)
+    if (active.length > 0 && active.every((activity) => activity.completed)) completedSites += 1
+
+    const labor = site.laborCost || 0
+    const materials = calculateMaterialCost(site)
+    const operational = calculateOperationalCostTotal(site)
+    totalLabor += labor
+    totalMaterials += materials
+    totalOperational += operational
+
+    const created = site.createdAt ? new Date(site.createdAt) : null
+    const valid = created && !Number.isNaN(created.getTime())
+    const monthKey = valid ? `${created.getUTCFullYear()}-${pad2(created.getUTCMonth() + 1)}` : 'unknown'
+    const yearKey = valid ? String(created.getUTCFullYear()) : 'unknown'
+    for (const [store, key] of [
+      [monthly, monthKey],
+      [yearly, yearKey],
+    ] as const) {
+      const row = bucket(store, key)
+      row.laborCost += labor
+      row.materialsCost += materials
+      row.operationalCost += operational
+      row.total += labor + materials + operational
+    }
+  }
+
+  const sorted = (store: Map<string, StatsPeriod>) =>
+    [...store.values()].sort((a, b) => a.period.localeCompare(b.period))
+
+  return {
+    totalSites: sites.length,
+    archivedSites,
+    completedSites,
+    completedPercentage: sites.length ? Math.round((completedSites / sites.length) * 1000) / 10 : 0,
+    expenses: {
+      totalLaborCost: totalLabor,
+      totalMaterialsCost: totalMaterials,
+      totalOperationalCost: totalOperational,
+      totalExpenses: totalLabor + totalMaterials + totalOperational,
+      monthly: sorted(monthly),
+      yearly: sorted(yearly),
+    },
+  }
 }
 
 function pad2(value: number) {
@@ -812,39 +772,36 @@ function buildErrorMessage(action: string, error: unknown) {
   return `${action}. ${detail}`
 }
 
-async function request<T>(path: string, options: RequestInit = {}) {
-  const headers = new Headers(options.headers)
-
-  if (options.body && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json')
-  }
-
-  // Add auth token if available
-  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
-  }
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  })
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => '')
-    throw new Error(message || `Request failed with status ${response.status}`)
-  }
-
-  if (response.status === 204) {
-    return undefined as T
-  }
-
-  const text = await response.text()
-  return (text ? JSON.parse(text) : undefined) as T
-}
-
 function Icon({ name }: { name: IconName }) {
   switch (name) {
+    case 'log-out':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <path d="m16 17 5-5-5-5" />
+          <path d="M21 12H9" />
+        </svg>
+      )
+    case 'sun':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+      )
+    case 'moon':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+        </svg>
+      )
+    case 'monitor':
+      return (
+        <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <path d="M8 21h8M12 17v4" />
+        </svg>
+      )
     case 'arrow-left':
       return (
         <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -1051,6 +1008,14 @@ function Icon({ name }: { name: IconName }) {
 }
 
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   return (
     <div className="modal active" role="dialog" aria-modal="true" aria-label={title} onMouseDown={onClose}>
       <div className="modal-content" onMouseDown={(event) => event.stopPropagation()}>
@@ -1127,6 +1092,10 @@ function SiteCard({
   const createdLabel = formatDate(site.createdAt)
   const longPressHandlers = useLongPress(() => onLongPress?.(site.id))
   const pressHandlers = !selectMode && onLongPress ? longPressHandlers : {}
+  const handleClick = () => (selectMode ? onToggleSelect?.(site.id) : onView(site.id))
+  const cardClass = `site-card${layout === 'list' ? ' site-card-list' : ''}${isSelected ? ' is-selected' : ''}${
+    site.isArchived ? ' is-archived' : ''
+  }${selectMode ? ' has-select' : ''}`
 
   const selectCheckbox = selectMode ? (
     <label className="site-card-select" onClick={(event) => event.stopPropagation()}>
@@ -1140,37 +1109,42 @@ function SiteCard({
     </label>
   ) : null
 
+  const typeBadge = site.siteType ? (
+    <span className="badge badge-site-type">
+      <span className="dot" />
+      {site.siteType}
+    </span>
+  ) : null
+  const archivedBadge = site.isArchived ? <span className="badge badge-archived">Archived</span> : null
+  const metaParts = [site.region || site.location, site.siteCode].filter(Boolean)
+
+  const progress = (
+    <>
+      <div className="progress-bar" role="progressbar" aria-valuenow={totals.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Activities complete">
+        <div className={`progress-fill${totals.progress === 100 ? ' is-complete' : ''}`} style={{ width: `${totals.progress}%` }} />
+      </div>
+      <span className="progress-value">{totals.progress}%</span>
+    </>
+  )
+
   if (layout === 'list') {
     return (
-      <article className="site-card site-card-list">
+      <article className={cardClass} style={strandStyle(site.siteType)}>
         {selectCheckbox}
-        <button
-          type="button"
-          className="site-list-row"
-          onClick={() => (selectMode ? onToggleSelect?.(site.id) : onView(site.id))}
-          {...pressHandlers}
-        >
-          <div className="site-icon">
-            <Icon name="building" />
-          </div>
+        <button type="button" className="site-list-row" onClick={handleClick} {...pressHandlers}>
           <div className="site-list-main">
-            <div className="site-name-container" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <h3 className="site-name" style={{ margin: 0 }}>{site.name}</h3>
-              {site.siteType ? <span className="badge badge-site-type">{site.siteType}</span> : null}
-              {site.isArchived ? <span className="badge badge-archived">Archived</span> : null}
+            <div className="site-list-title">
+              <h3 className="site-name">{site.name}</h3>
+              {typeBadge}
+              {archivedBadge}
             </div>
             <p className="site-meta-line">
-              {site.region ? `${site.region} · ` : ''}{site.materials.length} materials / {site.activities.length} activities
-              {createdLabel ? ` · Created ${createdLabel}` : ''}
+              {[...metaParts, createdLabel ? `Created ${createdLabel}` : null].filter(Boolean).join(', ') ||
+                `${site.activities.length} activities`}
             </p>
           </div>
           <div className="site-list-stats">
-            <div className="site-list-progress">
-              <div className="progress-bar" aria-label={`${totals.progress}% complete`}>
-                <div className="progress-fill" style={{ width: `${totals.progress}%` }} />
-              </div>
-              <span className="progress-value">{totals.progress}%</span>
-            </div>
+            <div className="site-list-progress">{progress}</div>
             <span className="site-list-total">{formatCurrency(totals.totalCost)}</span>
           </div>
           <Icon name="arrow-right" />
@@ -1180,69 +1154,58 @@ function SiteCard({
   }
 
   return (
-    <article className="site-card">
+    <article className={cardClass} style={strandStyle(site.siteType)}>
       {selectCheckbox}
-      <div className="site-card-content">
-        <div className="site-card-header">
-          <div className="site-icon-container">
-            <div className="site-icon">
-              <Icon name="building" />
-            </div>
-            <div>
-              <div className="site-name-container" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <h3 className="site-name" style={{ margin: 0 }}>{site.name}</h3>
-                {site.siteType ? <span className="badge badge-site-type">{site.siteType}</span> : null}
-                {site.isArchived ? <span className="badge badge-archived">Archived</span> : null}
-              </div>
-              <p className="site-meta-line">
-                {site.region ? `${site.region} · ` : ''}{site.materials.length} materials / {site.activities.length} activities
-              </p>
-              {createdLabel ? <p className="site-meta-line">Created {createdLabel}</p> : null}
-            </div>
-          </div>
+      <button type="button" className="site-card-body" onClick={handleClick} {...pressHandlers}>
+        <div className="site-card-top">
+          {typeBadge ?? <span className="badge badge-archived">No type</span>}
+          {archivedBadge}
         </div>
-
-        <div className="progress-container">
-          <div className="progress-header">
-            <span className="progress-label">Progress</span>
-            <span className="progress-value">{totals.progress}%</span>
-          </div>
-          <div className="progress-bar" aria-label={`${totals.progress}% complete`}>
-            <div className="progress-fill" style={{ width: `${totals.progress}%` }} />
-          </div>
+        <div className="site-heading">
+          <h3 className="site-name">{site.name}</h3>
+          <p className="site-meta-line">{metaParts.length ? metaParts.join(', ') : createdLabel ? `Created ${createdLabel}` : 'No location yet'}</p>
         </div>
-
+        <div className="site-card-total">
+          <CostFigure amount={totals.totalCost} />
+          <span className="cost-meta">total cost</span>
+        </div>
+        <div className="progress-container">{progress}</div>
         <div className="cost-breakdown">
-          <div className="cost-row">
-            <span className="cost-label">Materials Cost:</span>
-            <span className="cost-value">{formatCurrency(totals.materialCost)}</span>
+          <div className="cost-breakdown-item">
+            <span className="cost-label">Materials</span>
+            <span className="cost-value">{formatAmount(totals.materialCost)}</span>
           </div>
-          <div className="cost-row">
-            <span className="cost-label">Labor Cost:</span>
-            <span className="cost-value">{formatCurrency(site.laborCost)}</span>
+          <div className="cost-breakdown-item">
+            <span className="cost-label">Labor</span>
+            <span className="cost-value">{formatAmount(site.laborCost)}</span>
           </div>
-          <div className="cost-row">
-            <span className="cost-label">Operational Costs:</span>
-            <span className="cost-value">{formatCurrency(totals.operationalCost)}</span>
-          </div>
-          <div className="cost-row total">
-            <span className="cost-label">Total Cost:</span>
-            <span className="cost-value">{formatCurrency(totals.totalCost)}</span>
+          <div className="cost-breakdown-item">
+            <span className="cost-label">Operational</span>
+            <span className="cost-value">{formatAmount(totals.operationalCost)}</span>
           </div>
         </div>
-      </div>
-      <div className="site-card-footer">
-        <button
-          type="button"
-          className="view-details-btn"
-          onClick={() => (selectMode ? onToggleSelect?.(site.id) : onView(site.id))}
-          {...pressHandlers}
-        >
-          <span>{selectMode ? (isSelected ? 'Selected' : 'Select') : 'View Details'}</span>
-          <Icon name="arrow-right" />
-        </button>
-      </div>
+      </button>
     </article>
+  )
+}
+
+function SkeletonSites({ layout }: { layout: SiteViewLayout }) {
+  return (
+    <>
+      {Array.from({ length: layout === 'list' ? 5 : 6 }, (_, index) => (
+        <div key={index} className={`site-card skeleton-card${layout === 'list' ? ' site-card-list' : ''}`} aria-hidden="true">
+          <div className="skeleton-line" style={{ width: '28%' }} />
+          <div className="skeleton-line" style={{ width: '62%', height: '1.2rem' }} />
+          {layout === 'grid' ? (
+            <>
+              <div className="skeleton-line" style={{ width: '45%' }} />
+              <div className="skeleton-line" style={{ width: '50%', height: '1.6rem', marginTop: '1.25rem' }} />
+              <div className="skeleton-line" style={{ width: '100%', height: '0.4rem' }} />
+            </>
+          ) : null}
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -1356,9 +1319,15 @@ function EmptyPanel({
 }
 
 function App() {
-  const [user, setUser] = useState<AuthUser | null>(getStoredAuth())
-  const [sites, setSites] = useState<Site[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [user, setUser] = useState<AuthUser | null>(getStoredAuth)
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null)
+  // Paint the last-known data immediately, then refresh in the background.
+  const [sites, setSites] = useState<Site[]>(() => (getStoredAuth() ? readCache<Site[]>('sites') ?? [] : []))
+  const [isLoading, setIsLoading] = useState(() => !(getStoredAuth() && readCache<Site[]>('sites')))
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [theme, setTheme] = useState<ThemePreference>(readThemePreference)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
@@ -1387,10 +1356,10 @@ function App() {
   const [operationalCostErrors, setOperationalCostErrors] = useState<OperationalCostErrors>({})
   const [laborCostDraft, setLaborCostDraft] = useState('0')
   const [laborCostError, setLaborCostError] = useState(false)
-  const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null)
+  const [companySettings, setCompanySettings] = useState<CompanySettings | null>(() => readCache<CompanySettings>('settings'))
   const [companySettingsForm, setCompanySettingsForm] = useState(emptyCompanySettingsForm)
   const [companySettingsErrors, setCompanySettingsErrors] = useState<CompanySettingsErrors>({})
-  const [showArchived, setShowArchived] = useState(false)
+  const [siteFilter, setSiteFilter] = useState<SiteFilter>('active')
   const [slideshowIndex, setSlideshowIndex] = useState(0)
   const [isSlideshowOpen, setIsSlideshowOpen] = useState(false)
   const [infoMessage, setInfoMessage] = useState<string | null>(null)
@@ -1441,24 +1410,75 @@ function App() {
 
   // Top-level view mode (dashboard vs. stats) and stats data
   const [viewMode, setViewMode] = useState<'dashboard' | 'stats'>('dashboard')
-  const [stats, setStats] = useState<StatsResponse | null>(null)
-  const [isStatsLoading, setIsStatsLoading] = useState(false)
+  const stats = useMemo(() => computeStats(sites), [sites])
 
   // Full-fidelity JSON import
   const importInputRef = useRef<HTMLInputElement>(null)
 
   const handleLogin = (authUser: AuthUser) => {
+    setSessionNotice(null)
+    setIsLoading(true)
     setUser(authUser)
   }
 
-  const handleLogout = () => {
-    clearStoredAuth()
-    setUser(null)
+  const resetWorkspace = useCallback(() => {
+    clearCache()
     setSites([])
+    setCompanySettings(null)
     setCurrentSiteId(null)
-    setMainTab('materials')
+    setViewMode('dashboard')
+    setMainTab('about')
     setModal(null)
+    setUserMenuOpen(false)
+    setErrorMessage(null)
+    setInfoMessage(null)
+  }, [])
+
+  const handleLogout = () => {
+    clearSession()
+    resetWorkspace()
+    setUser(null)
   }
+
+  // Any request that comes back 401 (expired or revoked session) signs out.
+  useEffect(() => {
+    function handleUnauthorized(event: Event) {
+      resetWorkspace()
+      setUser(null)
+      setSessionNotice((event as CustomEvent<string>).detail || 'Your session has expired. Sign in again.')
+    }
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized)
+  }, [resetWorkspace])
+
+  useEffect(() => {
+    applyThemePreference(theme)
+  }, [theme])
+
+  // New view, new page: start at the top instead of keeping the old scroll.
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [currentSiteId, viewMode, user])
+
+  useEffect(() => {
+    if (!userMenuOpen) return
+    function handleClickOutside(event: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) setUserMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [userMenuOpen])
+
+  // Keep the local cache in step with what's on screen.
+  useEffect(() => {
+    if (!user || isLoading) return
+    const handle = setTimeout(() => writeCache('sites', sites), 250)
+    return () => clearTimeout(handle)
+  }, [sites, user, isLoading])
+
+  useEffect(() => {
+    if (user && companySettings) writeCache('settings', companySettings)
+  }, [companySettings, user])
 
   const selectedSite = useMemo(
     () => sites.find((site) => site.id === currentSiteId) ?? null,
@@ -1467,16 +1487,23 @@ function App() {
 
   const filteredSites = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase()
-    let base = normalizedSearch
-      ? sites.filter((site) => site.name.toLowerCase().includes(normalizedSearch))
-      : sites
-
-    if (siteSortOption === 'archived') {
-      base = base.filter((site) => site.isArchived)
-    }
+    const base = sites.filter((site) => {
+      if (siteFilter === 'active' && site.isArchived) return false
+      if (siteFilter === 'archived' && !site.isArchived) return false
+      if (!normalizedSearch) return true
+      return [site.name, site.region, site.location, site.siteCode, site.siteType].some((field) =>
+        field.toLowerCase().includes(normalizedSearch),
+      )
+    })
 
     const sorted = [...base]
     switch (siteSortOption) {
+      case 'cost-desc':
+        sorted.sort((a, b) => calculateSiteTotals(b).totalCost - calculateSiteTotals(a).totalCost)
+        break
+      case 'progress-asc':
+        sorted.sort((a, b) => calculateProgress(a) - calculateProgress(b))
+        break
       case 'oldest':
         sorted.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))
         break
@@ -1487,13 +1514,15 @@ function App() {
         sorted.sort((a, b) => b.name.localeCompare(a.name))
         break
       case 'newest':
-      case 'archived':
       default:
         sorted.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
         break
     }
     return sorted
-  }, [searchTerm, sites, siteSortOption])
+  }, [searchTerm, sites, siteSortOption, siteFilter])
+
+  const archivedCount = useMemo(() => sites.filter((site) => site.isArchived).length, [sites])
+  const activeCount = sites.length - archivedCount
 
   const visibleActivities = useMemo(() => {
     if (!selectedSite) return []
@@ -1521,43 +1550,56 @@ function App() {
   const selectedSiteLaborCost = selectedSite?.laborCost
   const selectedSiteTotals = selectedSite ? calculateSiteTotals(selectedSite) : null
 
+  const refreshData = useCallback(async () => {
+    // One request for every site (archived included): switching between
+    // Active / Archived / All is then instant and never hits the network.
+    const [sitesData, settingsData] = await Promise.all([
+      request<RawSite[]>('/sites?include_archived=true'),
+      request<CompanySettings>('/company-settings').catch(() => null),
+    ])
+    setSites(sitesData.map(normalizeSite))
+    if (settingsData) setCompanySettings(settingsData)
+  }, [])
+
   useEffect(() => {
+    if (!user) {
+      warmUpServer()
+      return
+    }
     let isMounted = true
 
-    async function loadInitialData() {
-      setIsLoading(true)
+    async function load() {
+      setIsSyncing(true)
       setErrorMessage(null)
-
       try {
-        const [sitesData, settingsData] = await Promise.all([
-          request<RawSite[]>(`/sites${showArchived ? '?include_archived=true' : ''}`),
-          request<CompanySettings>('/company-settings').catch(() => null)
-        ])
-        
-        if (isMounted) {
-          setSites(sitesData.map(normalizeSite))
-          if (settingsData) {
-            setCompanySettings(settingsData)
-          }
-        }
+        await refreshData()
       } catch (error) {
-        if (isMounted) {
-          setErrorMessage(buildErrorMessage('Failed to load initial data', error))
+        if (isMounted && !(error instanceof Error && 'status' in error && error.status === 401)) {
+          setErrorMessage(buildErrorMessage("Couldn't load the latest data", error))
           console.error('Failed to load initial data:', error)
         }
       } finally {
         if (isMounted) {
           setIsLoading(false)
+          setIsSyncing(false)
         }
       }
     }
 
-    loadInitialData()
+    load()
 
+    // Refresh when the tab comes back into focus, so other people's changes show up.
+    function handleVisibility() {
+      if (document.visibilityState === 'visible') {
+        refreshData().catch(() => undefined)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
     return () => {
       isMounted = false
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [showArchived])
+  }, [user, refreshData])
 
   useEffect(() => {
     if (selectedSiteId && selectedSiteLaborCost !== undefined) {
@@ -1599,21 +1641,9 @@ function App() {
     setMainTab('about')
   }
 
-  async function openStatsView() {
+  function openStatsView() {
     setCurrentSiteId(null)
     setViewMode('stats')
-    setIsStatsLoading(true)
-    setErrorMessage(null)
-
-    try {
-      const data = await request<StatsResponse>('/sites/stats')
-      setStats(data)
-    } catch (error) {
-      setErrorMessage(buildErrorMessage('Failed to load stats', error))
-      console.error('Failed to load stats:', error)
-    } finally {
-      setIsStatsLoading(false)
-    }
   }
 
   function showSiteDetails(siteId: string) {
@@ -1755,27 +1785,20 @@ function App() {
   }
 
   async function toggleArchiveSite(siteId: string, isCurrentlyArchived: boolean) {
-    setIsSaving(true)
     setErrorMessage(null)
+    // Optimistic: flip it now, undo if the server says no.
+    updateSiteLocally(siteId, (site) => ({ ...site, isArchived: !isCurrentlyArchived }))
+    if (!isCurrentlyArchived && siteFilter === 'active') showDashboard()
 
     try {
       const endpoint = isCurrentlyArchived ? `/sites/${siteId}/unarchive` : `/sites/${siteId}/archive`
       await request<void>(endpoint, { method: 'POST' })
-      
-      updateSiteLocally(siteId, (site) => ({ ...site, isArchived: !isCurrentlyArchived }))
-      if (isCurrentlyArchived && !showArchived) {
-        // Just unarchived while looking at non-archived, wait, this shouldn't happen usually
-      } else if (!isCurrentlyArchived && !showArchived) {
-        // Archived while looking at non-archived, remove from view
-        setSites(currentSites => currentSites.filter(s => s.id !== siteId))
-        showDashboard()
-      }
+      setInfoMessage(isCurrentlyArchived ? 'Site restored.' : 'Site archived. Find it under Archived.')
     } catch (error) {
+      updateSiteLocally(siteId, (site) => ({ ...site, isArchived: isCurrentlyArchived }))
       const action = isCurrentlyArchived ? 'unarchive' : 'archive'
-      setErrorMessage(buildErrorMessage(`Failed to ${action} site`, error))
+      setErrorMessage(buildErrorMessage(`Couldn't ${action} the site`, error))
       console.error(`Failed to ${action} site:`, error)
-    } finally {
-      setIsSaving(false)
     }
   }
 
@@ -1802,34 +1825,24 @@ function App() {
   }
 
   async function bulkArchiveSites(archive: boolean) {
-    if (selectedSiteIds.size === 0) return
+    const ids = sites.filter((site) => selectedSiteIds.has(site.id) && site.isArchived !== archive).map((site) => site.id)
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
 
-    setIsSaving(true)
     setErrorMessage(null)
+    setSites((current) => current.map((site) => (idSet.has(site.id) ? { ...site, isArchived: archive } : site)))
+    setSelectedSiteIds(new Set())
+    setSiteSelectMode(false)
 
     try {
-      const ids = Array.from(selectedSiteIds)
       const endpoint = archive ? '/sites/bulk-archive' : '/sites/bulk-unarchive'
-      await request<{ message: string; archivedIds?: string[]; unarchivedIds?: string[] }>(endpoint, {
-        method: 'POST',
-        body: JSON.stringify(ids),
-      })
-
-      if (archive && !showArchived) {
-        setSites((currentSites) => currentSites.filter((site) => !selectedSiteIds.has(site.id)))
-      } else {
-        setSites((currentSites) =>
-          currentSites.map((site) => (selectedSiteIds.has(site.id) ? { ...site, isArchived: archive } : site)),
-        )
-      }
-      setSelectedSiteIds(new Set())
-      setSiteSelectMode(false)
+      await request<{ message: string }>(endpoint, { method: 'POST', body: JSON.stringify(ids) })
+      setInfoMessage(`${ids.length} site${ids.length === 1 ? '' : 's'} ${archive ? 'archived' : 'restored'}.`)
     } catch (error) {
+      setSites((current) => current.map((site) => (idSet.has(site.id) ? { ...site, isArchived: !archive } : site)))
       const action = archive ? 'archive' : 'unarchive'
-      setErrorMessage(buildErrorMessage(`Failed to ${action} selected sites`, error))
+      setErrorMessage(buildErrorMessage(`Couldn't ${action} the selected sites`, error))
       console.error(`Failed to ${action} selected sites:`, error)
-    } finally {
-      setIsSaving(false)
     }
   }
 
@@ -1982,17 +1995,15 @@ function App() {
 
   async function removeMaterial(materialId: string) {
     if (!selectedSite) return
+    const siteId = selectedSite.id
+    const previous = selectedSite.materials
+    updateSiteLocally(siteId, (site) => ({ ...site, materials: site.materials.filter((m) => m.id !== materialId) }))
 
     try {
-      await request<void>(`/sites/${selectedSite.id}/materials/${materialId}`, {
-        method: 'DELETE',
-      })
-      updateSiteLocally(selectedSite.id, (site) => ({
-        ...site,
-        materials: site.materials.filter((material) => material.id !== materialId),
-      }))
+      await request<void>(`/sites/${siteId}/materials/${materialId}`, { method: 'DELETE' })
     } catch (error) {
-      setErrorMessage(buildErrorMessage('Failed to remove material', error))
+      updateSiteLocally(siteId, (site) => ({ ...site, materials: previous }))
+      setErrorMessage(buildErrorMessage("Couldn't remove the material", error))
       console.error('Failed to remove material:', error)
     }
   }
@@ -2165,37 +2176,39 @@ function App() {
 
   async function removeActivity(activityId: string) {
     if (!selectedSite) return
+    const siteId = selectedSite.id
+    const previous = selectedSite.activities
+    updateSiteLocally(siteId, (site) => ({ ...site, activities: site.activities.filter((a) => a.id !== activityId) }))
 
     try {
-      await request<void>(`/sites/${selectedSite.id}/activities/${activityId}`, {
-        method: 'DELETE',
-      })
-      updateSiteLocally(selectedSite.id, (site) => ({
-        ...site,
-        activities: site.activities.filter((activity) => activity.id !== activityId),
-      }))
+      await request<void>(`/sites/${siteId}/activities/${activityId}`, { method: 'DELETE' })
     } catch (error) {
-      setErrorMessage(buildErrorMessage('Failed to remove activity', error))
+      updateSiteLocally(siteId, (site) => ({ ...site, activities: previous }))
+      setErrorMessage(buildErrorMessage("Couldn't remove the activity", error))
       console.error('Failed to remove activity:', error)
     }
   }
 
   async function toggleActivity(activity: Activity) {
     if (!selectedSite) return
+    const siteId = selectedSite.id
+    const setCompleted = (completed: boolean) =>
+      updateSiteLocally(siteId, (site) => ({
+        ...site,
+        activities: site.activities.map((item) =>
+          item.id === activity.id ? { ...item, completed } : item,
+        ),
+      }))
+    setCompleted(!activity.completed)
 
     try {
-      await request<void>(`/sites/${selectedSite.id}/activities/${activity.id}`, {
+      await request<void>(`/sites/${siteId}/activities/${activity.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ completed: !activity.completed }),
       })
-      updateSiteLocally(selectedSite.id, (site) => ({
-        ...site,
-        activities: site.activities.map((siteActivity) =>
-          siteActivity.id === activity.id ? { ...siteActivity, completed: !siteActivity.completed } : siteActivity,
-        ),
-      }))
     } catch (error) {
-      setErrorMessage(buildErrorMessage('Failed to update activity', error))
+      setCompleted(activity.completed)
+      setErrorMessage(buildErrorMessage("Couldn't update the activity", error))
       console.error('Failed to update activity:', error)
     }
   }
@@ -2249,17 +2262,18 @@ function App() {
 
   async function removeOperationalCost(costId: string) {
     if (!selectedSite) return
+    const siteId = selectedSite.id
+    const previous = selectedSite.operationalCosts
+    updateSiteLocally(siteId, (site) => ({
+      ...site,
+      operationalCosts: site.operationalCosts.filter((cost) => cost.id !== costId),
+    }))
 
     try {
-      await request<void>(`/sites/${selectedSite.id}/operational-costs/${costId}`, {
-        method: 'DELETE',
-      })
-      updateSiteLocally(selectedSite.id, (site) => ({
-        ...site,
-        operationalCosts: site.operationalCosts.filter((cost) => cost.id !== costId),
-      }))
+      await request<void>(`/sites/${siteId}/operational-costs/${costId}`, { method: 'DELETE' })
     } catch (error) {
-      setErrorMessage(buildErrorMessage('Failed to remove operational cost', error))
+      updateSiteLocally(siteId, (site) => ({ ...site, operationalCosts: previous }))
+      setErrorMessage(buildErrorMessage("Couldn't remove the cost", error))
       console.error('Failed to remove operational cost:', error)
     }
   }
@@ -2364,8 +2378,7 @@ function App() {
           : ''
       setInfoMessage(`${result.message}.${skippedSummary}`)
 
-      const refreshedSites = await request<RawSite[]>(`/sites${showArchived ? '?include_archived=true' : ''}`)
-      setSites(refreshedSites.map(normalizeSite))
+      await refreshData()
     } catch (error) {
       setErrorMessage(buildErrorMessage('Failed to import data', error))
       console.error('Failed to import data:', error)
@@ -2374,40 +2387,65 @@ function App() {
     }
   }
 
-  // Show login page if not authenticated
   if (!user) {
-    return <LoginPage onLogin={handleLogin} />
+    return <AuthScreen onAuthenticated={handleLogin} notice={sessionNotice} />
   }
+
+  const initials = (user.username || user.email || '?')
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('')
 
   return (
     <div className="app-shell">
       <header className="header">
         <div className="container header-container">
-          <div className="header-left">
-            {companySettings?.logoUrl ? <img src={companySettings.logoUrl} alt="Logo" className="company-logo" /> : null}
-            <h1 className="app-title">{companySettings?.name || 'Telecom Site Manager'}</h1>
-          </div>
-          <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span className="user-info" style={{ fontSize: '0.85rem', color: 'var(--muted-foreground)', marginRight: '8px' }}>
-              {user.username} ({user.role})
-            </span>
-            <button type="button" className="btn btn-icon" onClick={openCompanySettingsModal} aria-label="Settings" title="Settings">
-              <Icon name="settings" />
+          <button type="button" className="header-left header-home" onClick={showDashboard} aria-label="Go to sites">
+            <img src={companySettings?.logoUrl || '/logo-192.png'} alt="" className="company-logo" />
+            <span className="app-title">{companySettings?.name || 'Telecom Site Manager'}</span>
+          </button>
+
+          <nav className="app-nav" aria-label="Main">
+            <button
+              type="button"
+              className={`nav-tab${viewMode === 'dashboard' || selectedSite ? ' active' : ''}`}
+              onClick={showDashboard}
+              aria-current={viewMode === 'dashboard' || selectedSite ? 'page' : undefined}
+            >
+              <Icon name="grid" />
+              Sites
             </button>
-            <button type="button" className="btn btn-icon" onClick={openStatsView} aria-label="Stats" title="Stats">
+            <button
+              type="button"
+              className={`nav-tab${viewMode === 'stats' && !selectedSite ? ' active' : ''}`}
+              onClick={openStatsView}
+              aria-current={viewMode === 'stats' && !selectedSite ? 'page' : undefined}
+            >
               <Icon name="bar-chart" />
+              Stats
             </button>
+          </nav>
+
+          <div className="header-right">
+            {isSyncing && !isLoading ? (
+              <span className="sync-indicator" role="status">
+                <span>Syncing</span>
+              </span>
+            ) : null}
             <div className="dropdown" ref={importExportMenuRef}>
               <button
                 type="button"
-                className="btn btn-outline"
+                className="btn btn-icon"
                 onClick={() => setImportExportMenuOpen((open) => !open)}
                 disabled={isSaving}
                 aria-haspopup="true"
                 aria-expanded={importExportMenuOpen}
+                aria-label="Import or export"
+                title="Import or export"
               >
                 <Icon name="arrow-up-down" />
-                <span className="btn-text">Import/Export</span>
               </button>
               {importExportMenuOpen ? (
                 <div className="dropdown-menu">
@@ -2420,7 +2458,7 @@ function App() {
                     }}
                   >
                     <Icon name="download" />
-                    <span>Export (JSON)</span>
+                    <span>Export all data (JSON)</span>
                   </button>
                   <button
                     type="button"
@@ -2431,22 +2469,65 @@ function App() {
                     }}
                   >
                     <Icon name="upload" />
-                    <span>Import (JSON)</span>
+                    <span>Import from JSON</span>
                   </button>
                 </div>
               ) : null}
             </div>
-            <input
-              ref={importInputRef}
-              type="file"
-              accept="application/json"
-              style={{ display: 'none' }}
-              onChange={handleImportFileSelected}
-            />
-            <button type="button" className="btn btn-ghost" onClick={handleLogout} style={{ marginLeft: '8px' }}>
-              <Icon name="arrow-left" />
-              <span className="btn-text">Logout</span>
+            <input ref={importInputRef} type="file" accept="application/json" hidden onChange={handleImportFileSelected} />
+            <button type="button" className="btn btn-icon" onClick={openCompanySettingsModal} aria-label="Company settings" title="Company settings">
+              <Icon name="settings" />
             </button>
+
+            <div className="dropdown" ref={userMenuRef}>
+              <button
+                type="button"
+                className="avatar-btn"
+                onClick={() => setUserMenuOpen((open) => !open)}
+                aria-haspopup="true"
+                aria-expanded={userMenuOpen}
+                aria-label="Account menu"
+                title={user.email || user.username}
+              >
+                {initials || '?'}
+              </button>
+              {userMenuOpen ? (
+                <div className="dropdown-menu user-menu">
+                  <div className="user-menu-head">
+                    <p className="user-menu-name">{user.username}</p>
+                    {user.email ? <p className="user-menu-email">{user.email}</p> : null}
+                    <span className="role-pill">{user.role}</span>
+                  </div>
+                  <div className="user-menu-section">
+                    <span className="user-menu-label">Appearance</span>
+                    <div className="segmented full" role="group" aria-label="Theme">
+                      {(
+                        [
+                          ['system', 'monitor', 'Auto'],
+                          ['light', 'sun', 'Light'],
+                          ['dark', 'moon', 'Dark'],
+                        ] as const
+                      ).map(([value, icon, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={theme === value ? 'active' : ''}
+                          onClick={() => setTheme(value)}
+                          aria-pressed={theme === value}
+                        >
+                          <Icon name={icon} />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button type="button" className="dropdown-item is-danger" onClick={handleLogout}>
+                    <Icon name="log-out" />
+                    <span>Sign out</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </header>
@@ -2471,51 +2552,43 @@ function App() {
         ) : null}
 
         {!selectedSite && viewMode === 'stats' ? (
-          <section id="stats-view" className="view">
-            <div className="site-details-header">
-              <button type="button" className="btn btn-icon" onClick={showDashboard} aria-label="Back to sites" title="Back to sites">
-                <Icon name="arrow-left" />
-              </button>
-              <div className="site-info">
-                <h2 className="site-title">Site Stats</h2>
+          <section id="stats-view" className="view" key="stats">
+            <div className="dashboard-header">
+              <div>
+                <h2 className="section-title">Stats</h2>
+                <p className="section-sub">Costs and progress across your active sites.</p>
               </div>
             </div>
 
-            {isStatsLoading ? (
-              <EmptyPanel title="Loading stats" text="Crunching the numbers." icon="bar-chart" />
-            ) : stats ? (
+            {isLoading ? (
+              <div className="sites-grid">
+                <SkeletonSites layout="grid" />
+              </div>
+            ) : (
               <>
                 <div className="stats-grid">
                   <div className="stat-tile">
-                    <div className="stat-tile-label">Total Sites</div>
+                    <div className="stat-tile-label">Active sites</div>
                     <div className="stat-tile-value">{stats.totalSites}</div>
                   </div>
                   <div className="stat-tile">
-                    <div className="stat-tile-label">Archived Sites</div>
-                    <div className="stat-tile-value">{stats.archivedSites}</div>
-                  </div>
-                  <div className="stat-tile">
-                    <div className="stat-tile-label">Completed Sites</div>
+                    <div className="stat-tile-label">Completed</div>
                     <div className="stat-tile-value">{stats.completedSites}</div>
                   </div>
                   <div className="stat-tile">
-                    <div className="stat-tile-label">Completed %</div>
+                    <div className="stat-tile-label">Completion rate</div>
                     <div className="stat-tile-value">{stats.completedPercentage.toFixed(1)}%</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-tile-label">Archived</div>
+                    <div className="stat-tile-value">{stats.archivedSites}</div>
                   </div>
                 </div>
 
                 <div className="cost-summary-cards">
                   <div className="card cost-card">
                     <div className="card-header">
-                      <h3 className="card-title">Total Labor Cost</h3>
-                    </div>
-                    <div className="card-content">
-                      <div className="cost-amount">{formatCurrency(stats.expenses.totalLaborCost)}</div>
-                    </div>
-                  </div>
-                  <div className="card cost-card">
-                    <div className="card-header">
-                      <h3 className="card-title">Total Materials Cost</h3>
+                      <h3 className="card-title">Materials</h3>
                     </div>
                     <div className="card-content">
                       <div className="cost-amount">{formatCurrency(stats.expenses.totalMaterialsCost)}</div>
@@ -2523,21 +2596,34 @@ function App() {
                   </div>
                   <div className="card cost-card">
                     <div className="card-header">
-                      <h3 className="card-title">Total Operational Cost</h3>
+                      <h3 className="card-title">Labor and operational</h3>
                     </div>
                     <div className="card-content">
-                      <div className="cost-amount">{formatCurrency(stats.expenses.totalOperationalCost)}</div>
+                      <div className="cost-amount">
+                        {formatCurrency(stats.expenses.totalLaborCost + stats.expenses.totalOperationalCost)}
+                      </div>
+                      <p className="cost-meta">
+                        {formatCurrency(stats.expenses.totalLaborCost)} labor, {formatCurrency(stats.expenses.totalOperationalCost)} operational
+                      </p>
+                    </div>
+                  </div>
+                  <div className="card cost-card is-total">
+                    <div className="card-header">
+                      <h3 className="card-title">Total spend</h3>
+                    </div>
+                    <div className="card-content">
+                      <div className="cost-amount">{formatCurrency(stats.expenses.totalExpenses)}</div>
                     </div>
                   </div>
                 </div>
 
-                <div className="card mt-4" style={{ marginBottom: '1.5rem' }}>
+                <div className="card mt-4">
                   <div className="card-header">
-                    <h3 className="card-title">Monthly Expenses</h3>
+                    <h3 className="card-title">Monthly expenses</h3>
                   </div>
-                  <div className="card-content" style={{ overflowX: 'auto' }}>
+                  <div className="card-content stats-table-wrap">
                     {stats.expenses.monthly.length === 0 ? (
-                      <p className="cost-meta">No monthly expense data yet.</p>
+                      <p className="cost-meta">No expenses recorded yet.</p>
                     ) : (
                       <table className="stats-table">
                         <thead>
@@ -2560,7 +2646,7 @@ function App() {
                                 <td>{formatCurrency(row.operationalCost)}</td>
                                 <td>
                                   {formatCurrency(row.total)}
-                                  <div className="stats-bar-track" style={{ marginTop: '0.35rem' }}>
+                                  <div className="stats-bar-track">
                                     <div className="stats-bar-fill" style={{ width: `${(row.total / maxTotal) * 100}%` }} />
                                   </div>
                                 </td>
@@ -2572,14 +2658,13 @@ function App() {
                     )}
                   </div>
                 </div>
-
-                <div className="card">
+                <div className="card mt-4">
                   <div className="card-header">
-                    <h3 className="card-title">Yearly Expenses</h3>
+                    <h3 className="card-title">Yearly expenses</h3>
                   </div>
-                  <div className="card-content" style={{ overflowX: 'auto' }}>
+                  <div className="card-content stats-table-wrap">
                     {stats.expenses.yearly.length === 0 ? (
-                      <p className="cost-meta">No yearly expense data yet.</p>
+                      <p className="cost-meta">No expenses recorded yet.</p>
                     ) : (
                       <table className="stats-table">
                         <thead>
@@ -2602,7 +2687,7 @@ function App() {
                                 <td>{formatCurrency(row.operationalCost)}</td>
                                 <td>
                                   {formatCurrency(row.total)}
-                                  <div className="stats-bar-track" style={{ marginTop: '0.35rem' }}>
+                                  <div className="stats-bar-track">
                                     <div className="stats-bar-fill" style={{ width: `${(row.total / maxTotal) * 100}%` }} />
                                   </div>
                                 </td>
@@ -2615,119 +2700,143 @@ function App() {
                   </div>
                 </div>
               </>
-            ) : (
-              <EmptyPanel title="No stats available" text="Stats could not be loaded." icon="bar-chart" />
             )}
           </section>
         ) : !selectedSite ? (
-          <section id="dashboard-view" className="view">
+          <section id="dashboard-view" className="view" key="dashboard">
             <div className="dashboard-header">
-              <h2 className="section-title">Sites</h2>
-              <div className="dashboard-actions">
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={showArchived}
-                    onChange={(e) => setShowArchived(e.target.checked)}
-                  />
-                  <span className="toggle-slider"></span>
-                  <span className="toggle-label" style={{ marginLeft: '8px', fontSize: '0.9rem' }}>Show Archived</span>
-                </label>
-                <select
-                  className="select"
-                  style={{ width: 'auto' }}
-                  value={siteSortOption}
-                  onChange={(event) => {
-                    const nextOption = event.target.value as SiteSortOption
-                    setSiteSortOption(nextOption)
-                    if (nextOption === 'archived') {
-                      setShowArchived(true)
-                    }
-                  }}
-                  aria-label="Sort sites"
-                >
-                  <option value="newest">Newest first</option>
-                  <option value="oldest">Oldest first</option>
-                  <option value="name-asc">Name (A–Z)</option>
-                  <option value="name-desc">Name (Z–A)</option>
-                  <option value="archived">Archived</option>
-                </select>
-                <div className="search-container">
-                  <Icon name="search" />
-                  <input
-                    type="search"
-                    className="search-input"
-                    placeholder="Search sites..."
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                  />
-                </div>
-                <div className="view-toggle" role="group" aria-label="Site view layout">
+              <div>
+                <h2 className="section-title">Sites</h2>
+                <p className="section-sub">
+                  {isLoading
+                    ? 'Loading your sites…'
+                    : `${activeCount} active${archivedCount ? `, ${archivedCount} archived` : ''}`}
+                </p>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={openAddSiteModal}>
+                <Icon name="plus" />
+                <span className="btn-text">Add site</span>
+              </button>
+            </div>
+
+            <div className="toolbar">
+              <div className="search-container">
+                <Icon name="search" />
+                <input
+                  type="search"
+                  className="search-input"
+                  placeholder="Search name, region, code…"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  aria-label="Search sites"
+                />
+              </div>
+              <div className="segmented" role="group" aria-label="Filter sites">
+                {(
+                  [
+                    ['active', 'Active', activeCount],
+                    ['archived', 'Archived', archivedCount],
+                    ['all', 'All', sites.length],
+                  ] as const
+                ).map(([value, label, count]) => (
                   <button
+                    key={value}
                     type="button"
-                    className={`view-toggle-btn${siteViewLayout === 'grid' ? ' active' : ''}`}
-                    onClick={() => setSiteViewLayout('grid')}
-                    aria-pressed={siteViewLayout === 'grid'}
-                    aria-label="Grid view"
-                    title="Grid view"
+                    className={siteFilter === value ? 'active' : ''}
+                    onClick={() => {
+                      setSiteFilter(value)
+                      setSelectedSiteIds(new Set())
+                    }}
+                    aria-pressed={siteFilter === value}
                   >
-                    <Icon name="grid" />
+                    {label}
+                    <span className="count">{count}</span>
                   </button>
-                  <button
-                    type="button"
-                    className={`view-toggle-btn${siteViewLayout === 'list' ? ' active' : ''}`}
-                    onClick={() => setSiteViewLayout('list')}
-                    aria-pressed={siteViewLayout === 'list'}
-                    aria-label="List view"
-                    title="List view"
-                  >
-                    <Icon name="list" />
-                  </button>
-                </div>
+                ))}
+              </div>
+              <div className="toolbar-spacer" />
+              <select
+                className="select"
+                value={siteSortOption}
+                onChange={(event) => setSiteSortOption(event.target.value as SiteSortOption)}
+                aria-label="Sort sites"
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="name-asc">Name, A to Z</option>
+                <option value="name-desc">Name, Z to A</option>
+                <option value="cost-desc">Highest cost</option>
+                <option value="progress-asc">Least progress</option>
+              </select>
+              <div className="view-toggle" role="group" aria-label="Layout">
                 <button
                   type="button"
-                  className={`btn btn-outline select-mode-btn${siteSelectMode ? ' is-active' : ''}`}
-                  onClick={toggleSiteSelectMode}
+                  className={`view-toggle-btn${siteViewLayout === 'grid' ? ' active' : ''}`}
+                  onClick={() => setSiteViewLayout('grid')}
+                  aria-pressed={siteViewLayout === 'grid'}
+                  aria-label="Grid view"
+                  title="Grid view"
                 >
-                  <Icon name="check-circle" />
-                  <span className="btn-text">{siteSelectMode ? 'Cancel' : 'Select'}</span>
+                  <Icon name="grid" />
                 </button>
-                <button type="button" className="btn btn-primary" onClick={openAddSiteModal}>
-                  <Icon name="plus" />
-                  <span className="btn-text">Add Site</span>
+                <button
+                  type="button"
+                  className={`view-toggle-btn${siteViewLayout === 'list' ? ' active' : ''}`}
+                  onClick={() => setSiteViewLayout('list')}
+                  aria-pressed={siteViewLayout === 'list'}
+                  aria-label="List view"
+                  title="List view"
+                >
+                  <Icon name="list" />
                 </button>
               </div>
+              <button
+                type="button"
+                className={`btn btn-outline select-mode-btn${siteSelectMode ? ' is-active' : ''}`}
+                onClick={toggleSiteSelectMode}
+              >
+                <Icon name="check-circle" />
+                <span className="btn-text">{siteSelectMode ? 'Done' : 'Select'}</span>
+              </button>
             </div>
 
             {siteSelectMode && selectedSiteIds.size > 0 ? (
               <div className="bulk-action-bar">
                 <span>{selectedSiteIds.size} selected</span>
                 <div className="bulk-action-bar-actions">
-                  {showArchived ? (
-                    <button type="button" className="btn btn-outline" onClick={() => bulkArchiveSites(false)} disabled={isSaving}>
-                      <Icon name="archive-restore" />
-                      <span>Unarchive Selected ({selectedSiteIds.size})</span>
-                    </button>
-                  ) : (
-                    <button type="button" className="btn btn-outline" onClick={() => bulkArchiveSites(true)} disabled={isSaving}>
+                  {sites.some((site) => selectedSiteIds.has(site.id) && !site.isArchived) ? (
+                    <button type="button" className="btn btn-outline" onClick={() => bulkArchiveSites(true)}>
                       <Icon name="archive" />
-                      <span>Archive Selected ({selectedSiteIds.size})</span>
+                      <span>Archive</span>
                     </button>
-                  )}
+                  ) : null}
+                  {sites.some((site) => selectedSiteIds.has(site.id) && site.isArchived) ? (
+                    <button type="button" className="btn btn-outline" onClick={() => bulkArchiveSites(false)}>
+                      <Icon name="archive-restore" />
+                      <span>Restore</span>
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}
 
             <div className={`sites-grid${siteViewLayout === 'list' ? ' sites-list' : ''}`}>
               {isLoading ? (
-                <EmptyPanel title="Loading sites" text="Fetching the latest project data." />
+                <SkeletonSites layout={siteViewLayout} />
               ) : filteredSites.length === 0 ? (
-                <EmptyPanel
-                  title={searchTerm.trim() ? 'No sites found' : 'No sites found'}
-                  text={searchTerm.trim() ? 'Try a different search term.' : 'Get started by adding your first site.'}
-                  actionLabel={searchTerm.trim() ? undefined : 'Add Site'}
-                  onAction={searchTerm.trim() ? undefined : openAddSiteModal}
-                />
+                searchTerm.trim() ? (
+                  <EmptyPanel title="No matching sites" text="Try a different name, region or site code." />
+                ) : siteFilter === 'archived' ? (
+                  <EmptyPanel title="No archived sites" text="Sites you archive are kept here, out of the way." icon="archive" />
+                ) : (
+                  <EmptyPanel
+                    title="No sites yet"
+                    text="Add your first site to start tracking materials, activities and costs."
+                    actionLabel="Add site"
+                    onAction={openAddSiteModal}
+                    icon="building"
+                  />
+                )
               ) : (
                 filteredSites.map((site) => (
                   <SiteCard
@@ -2745,7 +2854,7 @@ function App() {
             </div>
           </section>
         ) : (
-          <section id="site-details-view" className="view">
+          <section id="site-details-view" className="view" key={`site-${selectedSite.id}`}>
             <div className="site-details-header">
               <button type="button" className="btn btn-icon" onClick={showDashboard} aria-label="Back to sites" title="Back to sites">
                 <Icon name="arrow-left" />
@@ -2753,24 +2862,30 @@ function App() {
               <div className="site-info">
                 <div className="site-title-container">
                   <h2 className="site-title">{selectedSite.name}</h2>
-                  <button type="button" className="btn btn-icon" onClick={openEditSiteModal} aria-label="Edit site name" title="Edit site name">
+                  <button type="button" className="btn btn-icon" onClick={openEditSiteModal} aria-label="Edit site details" title="Edit site details">
                     <Icon name="edit" />
                   </button>
                 </div>
-                <div className="site-meta">
-                  <span>{selectedSite.materials.length} materials</span>
-                  <span>{selectedSite.activities.length} activities</span>
-                  <span>{selectedSiteTotals?.progress ?? 0}% complete</span>
+                <div className="site-meta" style={strandStyle(selectedSite.siteType)}>
+                  {selectedSite.siteType ? (
+                    <span className="badge badge-site-type">
+                      <span className="dot" />
+                      {selectedSite.siteType}
+                    </span>
+                  ) : null}
+                  {selectedSite.isArchived ? <span className="badge badge-archived">Archived</span> : null}
+                  <span className="meta-chip">{selectedSiteTotals?.progress ?? 0}% complete</span>
+                  {selectedSite.region ? <span className="meta-chip">{selectedSite.region}</span> : null}
                 </div>
               </div>
-              <div className="site-details-actions" style={{ display: 'flex', gap: '8px' }}>
-                <button type="button" className="btn btn-outline" onClick={() => toggleArchiveSite(selectedSite.id, selectedSite.isArchived)} disabled={isSaving}>
-                  <Icon name={selectedSite.isArchived ? "archive-restore" : "archive"} />
-                  <span className="btn-text">{selectedSite.isArchived ? "Unarchive" : "Archive"}</span>
+              <div className="site-details-actions">
+                <button type="button" className="btn btn-outline" onClick={() => toggleArchiveSite(selectedSite.id, selectedSite.isArchived)}>
+                  <Icon name={selectedSite.isArchived ? 'archive-restore' : 'archive'} />
+                  <span className="btn-text">{selectedSite.isArchived ? 'Restore' : 'Archive'}</span>
                 </button>
-                <button type="button" className="btn btn-danger" onClick={() => setModal('delete-site')}>
+                <button type="button" className="btn btn-danger-ghost" onClick={() => setModal('delete-site')}>
                   <Icon name="trash" />
-                  <span className="btn-text">Delete Site</span>
+                  <span className="btn-text">Delete</span>
                 </button>
               </div>
             </div>
@@ -2778,87 +2893,84 @@ function App() {
             <div className="cost-summary-cards">
               <div className="card cost-card">
                 <div className="card-header">
-                  <h3 className="card-title">Material Cost</h3>
+                  <h3 className="card-title">Materials</h3>
                 </div>
                 <div className="card-content">
                   <div className="cost-amount">{formatCurrency(selectedSiteTotals?.materialCost ?? 0)}</div>
-                  <p className="cost-meta">{selectedSite.materials.length} materials added</p>
+                  <p className="cost-meta">
+                    {selectedSite.materials.length} item{selectedSite.materials.length === 1 ? '' : 's'}
+                  </p>
                 </div>
               </div>
 
               <div className="card cost-card">
                 <div className="card-header">
-                  <h3 className="card-title">Labor & Operational</h3>
+                  <h3 className="card-title">Labor and operational</h3>
                 </div>
                 <div className="card-content">
                   <div className="cost-amount">{formatCurrency(selectedSiteTotals?.laborAndOperationalCost ?? 0)}</div>
-                  <p className="cost-meta">Combined costs</p>
+                  <p className="cost-meta">
+                    {formatCurrency(selectedSite.laborCost)} labor, {formatCurrency(selectedSiteTotals?.operationalCost ?? 0)} operational
+                  </p>
                 </div>
               </div>
 
-              <div className="card cost-card">
+              <div className="card cost-card is-total">
                 <div className="card-header">
-                  <h3 className="card-title">Total Cost</h3>
+                  <h3 className="card-title">Total cost</h3>
                 </div>
                 <div className="card-content">
                   <div className="cost-amount">{formatCurrency(selectedSiteTotals?.totalCost ?? 0)}</div>
-                  <p className="cost-meta">All costs combined</p>
+                  <p className="cost-meta">{selectedSiteTotals?.progress ?? 0}% of activities complete</p>
                 </div>
               </div>
             </div>
 
             <div className="tabs-container">
-              <div className="tabs" role="tablist" aria-label="Site detail sections">
-                <button
-                  type="button"
-                  className={`tab-btn ${mainTab === 'about' ? 'active' : ''}`}
-                  onClick={() => setMainTab('about')}
-                >
-                  About
-                </button>
-                <button
-                  type="button"
-                  className={`tab-btn ${mainTab === 'materials' ? 'active' : ''}`}
-                  onClick={() => setMainTab('materials')}
-                >
-                  Materials
-                </button>
-                <button
-                  type="button"
-                  className={`tab-btn ${mainTab === 'activities' ? 'active' : ''}`}
-                  onClick={() => setMainTab('activities')}
-                >
-                  Activities
-                </button>
-                <button
-                  type="button"
-                  className={`tab-btn ${mainTab === 'costs' ? 'active' : ''}`}
-                  onClick={() => setMainTab('costs')}
-                >
-                  Costs
-                </button>
+              <div className="tabs" role="tablist" aria-label="Site sections">
+                {(
+                  [
+                    ['about', 'About', null],
+                    ['materials', 'Materials', selectedSite.materials.length],
+                    ['activities', 'Activities', selectedSite.activities.filter((a) => !a.isArchived).length],
+                    ['costs', 'Costs', selectedSite.operationalCosts.length],
+                  ] as const
+                ).map(([value, label, count]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={mainTab === value}
+                    className={`tab-btn ${mainTab === value ? 'active' : ''}`}
+                    onClick={() => setMainTab(value)}
+                  >
+                    {label}
+                    {count !== null ? <span className="count">{count}</span> : null}
+                  </button>
+                ))}
               </div>
 
               {mainTab === 'about' ? (
                 <div className="tab-content active">
                   <div className="tab-header">
-                    <h3 className="tab-title" style={{ margin: 0 }}>About Site</h3>
+                    <h3 className="tab-title">About this site</h3>
                   </div>
                   
                   <div className="about-grid">
                     {selectedSite.siteCode ? (
                       <div className="about-field">
-                        <span className="about-label">Site Code</span>
-                        <div className="about-value"><span className="badge badge-site-type">{selectedSite.siteCode}</span></div>
+                        <span className="about-label">Site code</span>
+                        <div className="about-value"><span className="badge badge-code">{selectedSite.siteCode}</span></div>
                       </div>
                     ) : null}
                     
                     {selectedSite.siteType ? (
                       <div className="about-field">
-                        <span className="about-label">Site Type</span>
-                        <div className="about-value">
-                          <span className="badge badge-site-type" style={{ backgroundColor: 'var(--primary-color)', color: 'white', display: 'inline-flex', gap: '4px' }}>
-                            <Icon name="signal" /> {selectedSite.siteType}
+                        <span className="about-label">Site type</span>
+                        <div className="about-value" style={strandStyle(selectedSite.siteType)}>
+                          <span className="badge badge-site-type">
+                            <span className="dot" />
+                            {selectedSite.siteType}
                           </span>
                         </div>
                       </div>
@@ -2882,8 +2994,8 @@ function App() {
 
                   {(selectedSite.latitude !== null && selectedSite.longitude !== null) ? (
                     <div className="about-section mt-4">
-                      <span className="about-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                        <Icon name="map-pin" /> GPS Location
+                      <span className="about-label">
+                        <Icon name="map-pin" /> Map
                       </span>
                       <div className="map-container">
                         <iframe
@@ -2896,19 +3008,17 @@ function App() {
                         ></iframe>
                       </div>
                       {selectedSite.googleMapsUrl ? (
-                        <div style={{ marginTop: '0.75rem' }}>
-                          <a href={selectedSite.googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary-color)', textDecoration: 'none', fontWeight: 600, fontSize: '0.875rem' }}>
-                            Open in Google Maps &rarr;
-                          </a>
-                        </div>
+                        <a className="text-link" href={selectedSite.googleMapsUrl} target="_blank" rel="noopener noreferrer">
+                          Open in Google Maps
+                        </a>
                       ) : null}
                     </div>
                   ) : null}
 
                   {selectedSite.images && selectedSite.images.length > 0 ? (
                     <div className="about-section mt-4">
-                      <span className="about-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                        <Icon name="image" /> Site Images
+                      <span className="about-label">
+                        <Icon name="image" /> Photos
                       </span>
                       <div className="image-gallery">
                         {selectedSite.images.map((img, idx) => (
@@ -2929,7 +3039,7 @@ function App() {
 
                   {selectedSite.notes ? (
                     <div className="about-section mt-4">
-                      <span className="about-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <span className="about-label">
                         <Icon name="file-text" /> Notes
                       </span>
                       <div className="notes-display">
@@ -2940,8 +3050,8 @@ function App() {
 
                   {(!selectedSite.siteCode && !selectedSite.siteType && !selectedSite.region && !selectedSite.location && selectedSite.latitude === null && selectedSite.longitude === null && selectedSite.images.length === 0 && !selectedSite.notes) ? (
                     <EmptyPanel
-                      title="No site info available"
-                      text="Click the edit icon next to the site name to add information."
+                      title="No details yet"
+                      text="Add a type, region, map location, photos or notes with the edit button next to the site name."
                       icon="info"
                     />
                   ) : null}
@@ -2954,15 +3064,15 @@ function App() {
                     <h3 className="tab-title">Materials</h3>
                     <button type="button" className="btn btn-primary" onClick={openMaterialModal}>
                       <Icon name="plus" />
-                      <span>Add Material</span>
+                      <span>Add material</span>
                     </button>
                   </div>
                   <div className="list-container">
                     {selectedSite.materials.length === 0 ? (
                       <EmptyPanel
-                        title="No materials added yet"
-                        text="Track purchased and allocated materials for this site."
-                        actionLabel="Add Material"
+                        title="No materials yet"
+                        text="Log cable, poles, brackets and anything else bought for this site."
+                        actionLabel="Add material"
                         onAction={openMaterialModal}
                         icon="building"
                       />
@@ -3000,11 +3110,11 @@ function App() {
                     <h3 className="tab-title">Activities</h3>
                     <button type="button" className="btn btn-primary" onClick={openActivityModal}>
                       <Icon name="plus" />
-                      <span>Add Activity</span>
+                      <span>Add activity</span>
                     </button>
                   </div>
 
-                  <div className="dashboard-actions" style={{ marginBottom: '1rem' }}>
+                  <div className="toolbar">
                     <label className="toggle-switch">
                       <input
                         type="checkbox"
@@ -3012,16 +3122,16 @@ function App() {
                         onChange={(event) => setShowArchivedActivities(event.target.checked)}
                       />
                       <span className="toggle-slider"></span>
-                      <span className="toggle-label" style={{ marginLeft: '8px', fontSize: '0.9rem' }}>Show Archived</span>
+                      <span className="toggle-label">Show archived</span>
                     </label>
+                    <div className="toolbar-spacer" />
                     <select
                       className="select"
-                      style={{ width: 'auto' }}
                       value={activitySortOption}
                       onChange={(event) => setActivitySortOption(event.target.value as ActivitySortOption)}
                       aria-label="Sort activities"
                     >
-                      <option value="newest">Newest created</option>
+                      <option value="newest">Newest first</option>
                       <option value="start">Start date</option>
                       <option value="end">End date</option>
                       <option value="name">Name</option>
@@ -3032,7 +3142,7 @@ function App() {
                       onClick={toggleActivitySelectMode}
                     >
                       <Icon name="check-circle" />
-                      <span className="btn-text">{activitySelectMode ? 'Cancel' : 'Select'}</span>
+                      <span className="btn-text">{activitySelectMode ? 'Done' : 'Select'}</span>
                     </button>
                   </div>
 
@@ -3043,12 +3153,12 @@ function App() {
                         {showArchivedActivities ? (
                           <button type="button" className="btn btn-outline" onClick={() => bulkArchiveActivities(false)} disabled={isSaving}>
                             <Icon name="archive-restore" />
-                            <span>Unarchive Selected ({selectedActivityIds.size})</span>
+                            <span>Restore</span>
                           </button>
                         ) : (
                           <button type="button" className="btn btn-outline" onClick={() => bulkArchiveActivities(true)} disabled={isSaving}>
                             <Icon name="archive" />
-                            <span>Archive Selected ({selectedActivityIds.size})</span>
+                            <span>Archive</span>
                           </button>
                         )}
                       </div>
@@ -3058,9 +3168,9 @@ function App() {
                   <div className="list-container">
                     {visibleActivities.length === 0 ? (
                       <EmptyPanel
-                        title="No activities added yet"
-                        text="Add work activities to measure site progress."
-                        actionLabel="Add Activity"
+                        title={showArchivedActivities ? 'No activities' : 'No open activities'}
+                        text="Activities like site survey or cable laying drive this site's progress bar."
+                        actionLabel="Add activity"
                         onAction={openActivityModal}
                         icon="check-circle"
                       />
@@ -3085,12 +3195,14 @@ function App() {
 
               {mainTab === 'costs' ? (
                 <div className="tab-content active">
-                  <h3 className="tab-title">Labor Cost</h3>
-                  <form className="inline-panel mb-4" onSubmit={handleLaborCostSubmit}>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label htmlFor="labor-cost-input">Amount (GHS)</label>
-                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-                        <div style={{ flex: 1 }}>
+                  <div className="tab-header">
+                    <h3 className="tab-title">Labor</h3>
+                  </div>
+                  <form className="inline-panel" onSubmit={handleLaborCostSubmit}>
+                    <div className="form-group labor-form">
+                      <label htmlFor="labor-cost-input">Labor cost (GHS)</label>
+                      <div className="labor-row">
+                        <div className="labor-input">
                           <input
                             type="number"
                             id="labor-cost-input"
@@ -3104,25 +3216,25 @@ function App() {
                         </div>
                         <button type="submit" className="btn btn-primary" disabled={isSaving}>
                           <Icon name="check" />
-                          <span>Update</span>
+                          <span>Save</span>
                         </button>
                       </div>
                     </div>
                   </form>
 
-                  <div className="tab-header mt-4" style={{ marginTop: '2rem' }}>
-                    <h3 className="tab-title" style={{ margin: 0 }}>Operational Costs</h3>
+                  <div className="tab-header section-gap">
+                    <h3 className="tab-title">Operational costs</h3>
                     <button type="button" className="btn btn-primary" onClick={openOperationalCostModal}>
                       <Icon name="plus" />
-                      <span>Add Cost</span>
+                      <span>Add cost</span>
                     </button>
                   </div>
                   <div className="list-container mb-4">
                     {selectedSite.operationalCosts.length === 0 ? (
                       <EmptyPanel
-                        title="No operational costs added yet"
-                        text="Track transport, tools, and other site expenses."
-                        actionLabel="Add Cost"
+                        title="No operational costs yet"
+                        text="Track transport, tool hire, permits and other running expenses."
+                        actionLabel="Add cost"
                         onAction={openOperationalCostModal}
                         icon="plus"
                       />
@@ -3131,8 +3243,9 @@ function App() {
                         <div className="list-item" key={cost.id}>
                           <div>
                             <h4 className="list-item-title">{cost.name}</h4>
-                            <p className="list-item-subtitle">Allocated: {formatCurrency(cost.amount)}</p>
                           </div>
+                          <div className="list-item-actions">
+                            <span className="cost-value">{formatCurrency(cost.amount)}</span>
                           <button
                             type="button"
                             className="btn btn-icon"
@@ -3142,32 +3255,33 @@ function App() {
                           >
                             <Icon name="trash" />
                           </button>
+                          </div>
                         </div>
                       ))
                     )}
                   </div>
 
-                  <h3 className="tab-title mt-4" style={{ marginTop: '2rem' }}>Cost Summary</h3>
-                  <div className="inline-panel">
-                    <div className="cost-summary">
-                      <div className="cost-row">
-                        <span className="cost-label">Materials Cost:</span>
-                        <span className="cost-value">{formatCurrency(selectedSiteTotals?.materialCost ?? 0)}</span>
-                      </div>
-                      <div className="cost-row">
-                        <span className="cost-label">Labor Cost:</span>
-                        <span className="cost-value">{formatCurrency(selectedSite.laborCost)}</span>
-                      </div>
-                      <div className="cost-row">
-                        <span className="cost-label">Operational Cost:</span>
-                        <span className="cost-value">{formatCurrency(selectedSiteTotals?.operationalCost ?? 0)}</span>
-                      </div>
-                      <div className="cost-row total">
-                        <span className="cost-label">Total Cost:</span>
-                        <span className="cost-value">{formatCurrency(selectedSiteTotals?.totalCost ?? 0)}</span>
-                      </div>
-                    </div>
+                  <div className="tab-header section-gap">
+                    <h3 className="tab-title">Summary</h3>
                   </div>
+                  <dl className="cost-summary">
+                    <div className="cost-row">
+                      <dt>Materials</dt>
+                      <dd>{formatCurrency(selectedSiteTotals?.materialCost ?? 0)}</dd>
+                    </div>
+                    <div className="cost-row">
+                      <dt>Labor</dt>
+                      <dd>{formatCurrency(selectedSite.laborCost)}</dd>
+                    </div>
+                    <div className="cost-row">
+                      <dt>Operational</dt>
+                      <dd>{formatCurrency(selectedSiteTotals?.operationalCost ?? 0)}</dd>
+                    </div>
+                    <div className="cost-row total">
+                      <dt>Total</dt>
+                      <dd>{formatCurrency(selectedSiteTotals?.totalCost ?? 0)}</dd>
+                    </div>
+                  </dl>
                 </div>
               ) : null}
             </div>
@@ -3176,10 +3290,10 @@ function App() {
       </main>
 
       {modal === 'site' ? (
-        <Modal title={siteModalMode === 'add' ? 'Add New Site' : 'Edit Site Info'} onClose={closeModal}>
+        <Modal title={siteModalMode === 'add' ? 'Add site' : 'Edit site'} onClose={closeModal}>
           <form className="modal-form" onSubmit={handleSiteSubmit}>
             <div className="form-group">
-              <label htmlFor="site-name-input">Site Name *</label>
+              <label htmlFor="site-name-input">Site name</label>
               <input
                 type="text"
                 id="site-name-input"
@@ -3196,7 +3310,7 @@ function App() {
 
             <div className="form-row">
               <div className="form-group">
-                <label htmlFor="site-type-select">Site Type</label>
+                <label htmlFor="site-type-select">Site type</label>
                 <select
                   id="site-type-select"
                   className="select"
@@ -3237,7 +3351,7 @@ function App() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="site-created-at-input">Creation Date</label>
+              <label htmlFor="site-created-at-input">Start date</label>
               <input
                 type="date"
                 id="site-created-at-input"
@@ -3248,7 +3362,7 @@ function App() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="site-map-location-input">Map Location (Coordinates or Google Maps)</label>
+              <label htmlFor="site-map-location-input">Map location</label>
               <input
                 type="text"
                 id="site-map-location-input"
@@ -3275,7 +3389,7 @@ function App() {
             </div>
 
             <div className="form-group">
-              <label>Images</label>
+              <label>Photo links</label>
               <div className="image-link-list">
                 {siteFormImages.map((imageUrl, index) => (
                   <div className="image-link-row" key={index}>
@@ -3300,7 +3414,7 @@ function App() {
               </div>
               <button type="button" className="btn btn-outline" onClick={addImageLink}>
                 <Icon name="plus" />
-                <span>Add Image Link</span>
+                <span>Add photo link</span>
               </button>
             </div>
 
@@ -3309,7 +3423,6 @@ function App() {
               <textarea
                 id="site-notes-input"
                 className="input"
-                style={{ minHeight: '80px', resize: 'vertical' }}
                 placeholder="Any additional notes about the site..."
                 value={siteFormNotes}
                 onChange={(event) => setSiteFormNotes(event.target.value)}
@@ -3322,7 +3435,7 @@ function App() {
               </button>
               <button type="submit" className="btn btn-primary" disabled={isSaving}>
                 <Icon name="check" />
-                <span>Save</span>
+                <span>{siteModalMode === 'add' ? 'Add site' : 'Save changes'}</span>
               </button>
             </div>
           </form>
@@ -3330,19 +3443,19 @@ function App() {
       ) : null}
 
       {modal === 'material' ? (
-        <Modal title="Add Material" onClose={closeModal}>
+        <Modal title="Add material" onClose={closeModal}>
           <form className="modal-form" onSubmit={handleMaterialSubmit}>
-            <div className="tabs modal-tabs">
+            <div className="segmented full modal-tabs" role="group">
               <button
                 type="button"
-                className={`tab-btn ${materialMode === 'predefined' ? 'active' : ''}`}
+                className={materialMode === 'predefined' ? 'active' : ''}
                 onClick={() => setMaterialMode('predefined')}
               >
-                Predefined
+                From list
               </button>
               <button
                 type="button"
-                className={`tab-btn ${materialMode === 'custom' ? 'active' : ''}`}
+                className={materialMode === 'custom' ? 'active' : ''}
                 onClick={() => setMaterialMode('custom')}
               >
                 Custom
@@ -3352,7 +3465,7 @@ function App() {
             {materialMode === 'predefined' ? (
               <div className="tab-content active modal-tab-content">
                 <div className="form-group">
-                  <label htmlFor="predefined-material-select">Select Material</label>
+                  <label htmlFor="predefined-material-select">Material</label>
                   <select
                     id="predefined-material-select"
                     className="select"
@@ -3375,7 +3488,7 @@ function App() {
             ) : (
               <div className="tab-content active modal-tab-content">
                 <div className="form-group">
-                  <label htmlFor="custom-material-input">Material Name</label>
+                  <label htmlFor="custom-material-input">Material name</label>
                   <input
                     type="text"
                     id="custom-material-input"
@@ -3454,7 +3567,7 @@ function App() {
               </button>
               <button type="submit" className="btn btn-primary" disabled={isSaving}>
                 <Icon name="plus" />
-                <span>Add Material</span>
+                <span>Add material</span>
               </button>
             </div>
           </form>
@@ -3462,19 +3575,19 @@ function App() {
       ) : null}
 
       {modal === 'activity' ? (
-        <Modal title="Add Activity" onClose={closeModal}>
+        <Modal title="Add activity" onClose={closeModal}>
           <form className="modal-form" onSubmit={handleActivitySubmit}>
-            <div className="tabs modal-tabs">
+            <div className="segmented full modal-tabs" role="group">
               <button
                 type="button"
-                className={`tab-btn ${activityMode === 'predefined' ? 'active' : ''}`}
+                className={activityMode === 'predefined' ? 'active' : ''}
                 onClick={() => setActivityMode('predefined')}
               >
-                Predefined
+                From list
               </button>
               <button
                 type="button"
-                className={`tab-btn ${activityMode === 'custom' ? 'active' : ''}`}
+                className={activityMode === 'custom' ? 'active' : ''}
                 onClick={() => setActivityMode('custom')}
               >
                 Custom
@@ -3484,7 +3597,7 @@ function App() {
             {activityMode === 'predefined' ? (
               <div className="tab-content active modal-tab-content">
                 <div className="form-group">
-                  <label htmlFor="predefined-activity-select">Select Activity</label>
+                  <label htmlFor="predefined-activity-select">Activity</label>
                   <select
                     id="predefined-activity-select"
                     className="select"
@@ -3507,7 +3620,7 @@ function App() {
             ) : (
               <div className="tab-content active modal-tab-content">
                 <div className="form-group">
-                  <label htmlFor="custom-activity-input">Activity Name</label>
+                  <label htmlFor="custom-activity-input">Activity name</label>
                   <input
                     type="text"
                     id="custom-activity-input"
@@ -3553,7 +3666,7 @@ function App() {
               </button>
               <button type="submit" className="btn btn-primary" disabled={isSaving}>
                 <Icon name="plus" />
-                <span>Add Activity</span>
+                <span>Add activity</span>
               </button>
             </div>
           </form>
@@ -3561,10 +3674,10 @@ function App() {
       ) : null}
 
       {modal === 'edit-activity' && editingActivity ? (
-        <Modal title="Edit Activity" onClose={closeModal}>
+        <Modal title="Edit activity" onClose={closeModal}>
           <form className="modal-form" onSubmit={handleEditActivitySubmit}>
             <div className="form-group">
-              <label htmlFor="edit-activity-name-input">Activity Name</label>
+              <label htmlFor="edit-activity-name-input">Activity name</label>
               <input
                 type="text"
                 id="edit-activity-name-input"
@@ -3612,10 +3725,10 @@ function App() {
       ) : null}
 
       {modal === 'operational-cost' ? (
-        <Modal title="Add Operational Cost" onClose={closeModal}>
+        <Modal title="Add operational cost" onClose={closeModal}>
           <form className="modal-form" onSubmit={handleOperationalCostSubmit}>
             <div className="form-group">
-              <label htmlFor="operational-cost-name-input">Cost Name</label>
+              <label htmlFor="operational-cost-name-input">What was it for?</label>
               <input
                 type="text"
                 id="operational-cost-name-input"
@@ -3653,7 +3766,7 @@ function App() {
               </button>
               <button type="submit" className="btn btn-primary" disabled={isSaving}>
                 <Icon name="plus" />
-                <span>Add Cost</span>
+                <span>Add cost</span>
               </button>
             </div>
           </form>
@@ -3661,16 +3774,19 @@ function App() {
       ) : null}
 
       {modal === 'delete-site' && selectedSite ? (
-        <Modal title="Confirm Deletion" onClose={closeModal}>
+        <Modal title="Delete this site?" onClose={closeModal}>
           <div className="modal-form">
-            <p className="confirm-message">Are you sure you want to delete {selectedSite.name}? This action cannot be undone.</p>
+            <p className="confirm-message">
+              <strong>{selectedSite.name}</strong> and all of its materials, activities and costs will be permanently deleted.
+              If you might need it later, archive it instead.
+            </p>
             <div className="modal-footer">
               <button type="button" className="btn btn-outline" onClick={closeModal}>
                 Cancel
               </button>
               <button type="button" className="btn btn-danger" onClick={deleteSite} disabled={isSaving}>
                 <Icon name="trash" />
-                <span>Delete</span>
+                <span>Delete site</span>
               </button>
             </div>
           </div>
@@ -3678,10 +3794,10 @@ function App() {
       ) : null}
 
       {modal === 'company-settings' ? (
-        <Modal title="Company Settings" onClose={closeModal}>
+        <Modal title="Company settings" onClose={closeModal}>
           <form className="modal-form" onSubmit={handleCompanySettingsSubmit}>
             <div className="form-group">
-              <label htmlFor="settings-name-input">Company Name</label>
+              <label htmlFor="settings-name-input">Company name</label>
               <input
                 type="text"
                 id="settings-name-input"
@@ -3696,7 +3812,7 @@ function App() {
             </div>
             
             <div className="form-group">
-              <label htmlFor="settings-logo-input">Logo URL</label>
+              <label htmlFor="settings-logo-input">Logo link</label>
               <input
                 type="url"
                 id="settings-logo-input"
@@ -3760,7 +3876,7 @@ function App() {
               </button>
               <button type="submit" className="btn btn-primary" disabled={isSaving}>
                 <Icon name="check" />
-                <span>Save Settings</span>
+                <span>Save settings</span>
               </button>
             </div>
           </form>

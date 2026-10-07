@@ -309,6 +309,12 @@ const emptyMaterialForm = {
 // Suggestions only: the department field accepts any text.
 const departmentSuggestions = ['Engineering', 'Operations', 'Procurement', 'Logistics', 'Finance', 'Field Services', 'Projects']
 
+const emptyMaterialFilters = { search: '', department: '', requestor: '', from: '', to: '' }
+
+function uniqueSorted(values: string[]) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b))
+}
+
 // ---- Activity deadlines ----
 const DUE_SOON_MS = 48 * 60 * 60 * 1000
 
@@ -1422,6 +1428,9 @@ function App() {
   const [materialMode, setMaterialMode] = useState<MaterialMode>('predefined')
   const [materialForm, setMaterialForm] = useState(emptyMaterialForm)
   const [materialErrors, setMaterialErrors] = useState<MaterialErrors>({})
+  const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null)
+  const [editingCostId, setEditingCostId] = useState<string | null>(null)
+  const [materialFilters, setMaterialFilters] = useState(emptyMaterialFilters)
   const [activityMode, setActivityMode] = useState<ActivityMode>('predefined')
   const [activityForm, setActivityForm] = useState(emptyActivityForm)
   const [activityErrors, setActivityErrors] = useState<ActivityErrors>({})
@@ -1675,6 +1684,36 @@ function App() {
   }, [user, refreshData])
 
   useEffect(() => {
+    setMaterialFilters(emptyMaterialFilters)
+  }, [selectedSiteId])
+
+  const materialView = useMemo(() => {
+    const all = selectedSite ? selectedSite.materials : []
+    const f = materialFilters
+    const term = f.search.trim().toLowerCase()
+    const fromDay = f.from || null
+    const toDay = f.to || null
+    const rows = all
+      .filter((m) => {
+        if (term && !m.name.toLowerCase().includes(term)) return false
+        if (f.department && m.requestorDepartment !== f.department) return false
+        if (f.requestor && m.requestor !== f.requestor) return false
+        const day = m.purchaseDate ? isoToDateInputValue(m.purchaseDate) : ''
+        if (fromDay && (!day || day < fromDay)) return false
+        if (toDay && (!day || day > toDay)) return false
+        return true
+      })
+      .sort((a, b) => (b.purchaseDate ?? '').localeCompare(a.purchaseDate ?? ''))
+    return {
+      rows,
+      total: rows.reduce((sum, m) => sum + m.cost, 0),
+      departments: uniqueSorted(all.map((m) => m.requestorDepartment)),
+      requestors: uniqueSorted(all.map((m) => m.requestor)),
+      active: Boolean(term || f.department || f.requestor || fromDay || toDay),
+    }
+  }, [selectedSite, materialFilters])
+
+  useEffect(() => {
     if (selectedSiteId && selectedSiteLaborCost !== undefined) {
       setLaborCostDraft(String(selectedSiteLaborCost))
       setLaborCostError(false)
@@ -1762,7 +1801,25 @@ function App() {
     setModal('site')
   }
 
+  function openEditMaterialModal(material: Material) {
+    setEditingMaterialId(material.id)
+    setMaterialMode('custom')
+    setMaterialForm({
+      materialId: '',
+      customName: material.name,
+      quantity: String(material.quantity),
+      unit: material.unit,
+      cost: String(material.cost),
+      purchaseDate: isoToDateInputValue(material.purchaseDate) || todayDateInputValue(),
+      requestor: material.requestor,
+      requestorDepartment: material.requestorDepartment,
+    })
+    setMaterialErrors({})
+    setModal('material')
+  }
+
   function openMaterialModal() {
+    setEditingMaterialId(null)
     setMaterialMode('predefined')
     setMaterialForm({ ...emptyMaterialForm, purchaseDate: todayDateInputValue() })
     setMaterialErrors({})
@@ -1786,7 +1843,15 @@ function App() {
     setModal('edit-activity')
   }
 
+  function openEditOperationalCostModal(cost: OperationalCost) {
+    setEditingCostId(cost.id)
+    setOperationalCostForm({ name: cost.name, amount: String(cost.amount) })
+    setOperationalCostErrors({})
+    setModal('operational-cost')
+  }
+
   function openOperationalCostModal() {
+    setEditingCostId(null)
     setOperationalCostForm(emptyOperationalCostForm)
     setOperationalCostErrors({})
     setModal('operational-cost')
@@ -2051,20 +2116,37 @@ function App() {
     setErrorMessage(null)
 
     try {
-      const savedMaterial = await request<RawMaterial | undefined>(`/sites/${selectedSite.id}/materials`, {
-        method: 'POST',
-        body: JSON.stringify(material),
-      })
-
-      updateSiteLocally(selectedSite.id, (site) => ({
-        ...site,
-        materials: [...site.materials, normalizeMaterial(savedMaterial ?? material)],
-      }))
+      if (editingMaterialId) {
+        const { id: _ignored, ...changes } = material
+        void _ignored
+        const saved = await request<RawMaterial>(`/sites/${selectedSite.id}/materials/${editingMaterialId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(changes),
+        })
+        updateSiteLocally(selectedSite.id, (site) => ({
+          ...site,
+          materials: site.materials.map((m) =>
+            m.id === editingMaterialId ? normalizeMaterial({ ...changes, ...saved, id: editingMaterialId }) : m,
+          ),
+        }))
+        setInfoMessage(`Saved changes to ${material.name}.`)
+      } else {
+        const savedMaterial = await request<RawMaterial | undefined>(`/sites/${selectedSite.id}/materials`, {
+          method: 'POST',
+          body: JSON.stringify(material),
+        })
+        updateSiteLocally(selectedSite.id, (site) => ({
+          ...site,
+          materials: [...site.materials, normalizeMaterial(savedMaterial ?? material)],
+        }))
+      }
       closeModal()
+      setEditingMaterialId(null)
       setMainTab('materials')
     } catch (error) {
-      setErrorMessage(buildErrorMessage('Failed to add material', error))
-      console.error('Failed to add material:', error)
+      const action = editingMaterialId ? "Couldn't save the material" : "Couldn't add the material"
+      setErrorMessage(buildErrorMessage(action, error))
+      console.error(action, error)
     } finally {
       setIsSaving(false)
     }
@@ -2315,23 +2397,38 @@ function App() {
     setErrorMessage(null)
 
     try {
-      const savedCost = await request<RawOperationalCost | undefined>(
-        `/sites/${selectedSite.id}/operational-costs`,
-        {
-          method: 'POST',
-          body: JSON.stringify(operationalCost),
-        },
-      )
-
-      updateSiteLocally(selectedSite.id, (site) => ({
-        ...site,
-        operationalCosts: [...site.operationalCosts, normalizeOperationalCost(savedCost ?? operationalCost)],
-      }))
+      if (editingCostId) {
+        const saved = await request<RawOperationalCost>(
+          `/sites/${selectedSite.id}/operational-costs/${editingCostId}`,
+          { method: 'PATCH', body: JSON.stringify({ name: costName, amount }) },
+        )
+        updateSiteLocally(selectedSite.id, (site) => ({
+          ...site,
+          operationalCosts: site.operationalCosts.map((c) =>
+            c.id === editingCostId ? normalizeOperationalCost({ ...saved, id: editingCostId, name: costName, amount }) : c,
+          ),
+        }))
+        setInfoMessage(`Saved changes to ${costName}.`)
+      } else {
+        const savedCost = await request<RawOperationalCost | undefined>(
+          `/sites/${selectedSite.id}/operational-costs`,
+          {
+            method: 'POST',
+            body: JSON.stringify(operationalCost),
+          },
+        )
+        updateSiteLocally(selectedSite.id, (site) => ({
+          ...site,
+          operationalCosts: [...site.operationalCosts, normalizeOperationalCost(savedCost ?? operationalCost)],
+        }))
+      }
       closeModal()
+      setEditingCostId(null)
       setMainTab('costs')
     } catch (error) {
-      setErrorMessage(buildErrorMessage('Failed to add operational cost', error))
-      console.error('Failed to add operational cost:', error)
+      const action = editingCostId ? "Couldn't save the cost" : "Couldn't add the cost"
+      setErrorMessage(buildErrorMessage(action, error))
+      console.error(action, error)
     } finally {
       setIsSaving(false)
     }
@@ -3144,7 +3241,83 @@ function App() {
                       <span>Add material</span>
                     </button>
                   </div>
+                  {selectedSite.materials.length > 0 ? (
+                    <div className="filter-bar" role="search" aria-label="Filter materials">
+                      <div className="search-container">
+                        <Icon name="search" />
+                        <input
+                          type="search"
+                          className="search-input"
+                          placeholder="Search materials…"
+                          value={materialFilters.search}
+                          onChange={(event) => setMaterialFilters((f) => ({ ...f, search: event.target.value }))}
+                          aria-label="Search materials"
+                        />
+                      </div>
+                      <select
+                        className="select"
+                        value={materialFilters.department}
+                        onChange={(event) => setMaterialFilters((f) => ({ ...f, department: event.target.value }))}
+                        aria-label="Filter by department"
+                      >
+                        <option value="">All departments</option>
+                        {materialView.departments.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="select"
+                        value={materialFilters.requestor}
+                        onChange={(event) => setMaterialFilters((f) => ({ ...f, requestor: event.target.value }))}
+                        aria-label="Filter by requester"
+                      >
+                        <option value="">Anyone</option>
+                        {materialView.requestors.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="date-filter">
+                        <span>From</span>
+                        <input
+                          type="date"
+                          className="input"
+                          value={materialFilters.from}
+                          max={materialFilters.to || undefined}
+                          onChange={(event) => setMaterialFilters((f) => ({ ...f, from: event.target.value }))}
+                        />
+                      </label>
+                      <label className="date-filter">
+                        <span>To</span>
+                        <input
+                          type="date"
+                          className="input"
+                          value={materialFilters.to}
+                          min={materialFilters.from || undefined}
+                          onChange={(event) => setMaterialFilters((f) => ({ ...f, to: event.target.value }))}
+                        />
+                      </label>
+                      {materialView.active ? (
+                        <button type="button" className="btn btn-ghost" onClick={() => setMaterialFilters(emptyMaterialFilters)}>
+                          <Icon name="close" />
+                          <span>Clear</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {materialView.active ? (
+                    <p className="filter-summary">
+                      Showing {materialView.rows.length} of {selectedSite.materials.length} materials, totalling{' '}
+                      <strong>{formatCurrency(materialView.total)}</strong>
+                    </p>
+                  ) : null}
                   <div className="list-container">
+                    {selectedSite.materials.length > 0 && materialView.rows.length === 0 ? (
+                      <EmptyPanel title="No materials match" text="Try a wider date range or clear the filters." />
+                    ) : null}
                     {selectedSite.materials.length === 0 ? (
                       <EmptyPanel
                         title="No materials yet"
@@ -3154,9 +3327,7 @@ function App() {
                         icon="building"
                       />
                     ) : (
-                      [...selectedSite.materials]
-                        .sort((a, b) => (b.purchaseDate ?? '').localeCompare(a.purchaseDate ?? ''))
-                        .map((material) => (
+                      materialView.rows.map((material) => (
                         <div className="list-item" key={material.id}>
                           <div className="material-info">
                             <h4 className="list-item-title">{material.name}</h4>
@@ -3177,6 +3348,15 @@ function App() {
                           </div>
                           <div className="list-item-actions">
                             <span className="cost-value">{formatCurrency(material.cost)}</span>
+                            <button
+                              type="button"
+                              className="btn btn-icon"
+                              onClick={() => openEditMaterialModal(material)}
+                              aria-label={`Edit ${material.name}`}
+                              title={`Edit ${material.name}`}
+                            >
+                              <Icon name="edit" />
+                            </button>
                             <button
                               type="button"
                               className="btn btn-icon"
@@ -3336,6 +3516,15 @@ function App() {
                           </div>
                           <div className="list-item-actions">
                             <span className="cost-value">{formatCurrency(cost.amount)}</span>
+                          <button
+                            type="button"
+                            className="btn btn-icon"
+                            onClick={() => openEditOperationalCostModal(cost)}
+                            aria-label={`Edit ${cost.name}`}
+                            title={`Edit ${cost.name}`}
+                          >
+                            <Icon name="edit" />
+                          </button>
                           <button
                             type="button"
                             className="btn btn-icon"
@@ -3533,8 +3722,9 @@ function App() {
       ) : null}
 
       {modal === 'material' ? (
-        <Modal title="Add material" onClose={closeModal}>
+        <Modal title={editingMaterialId ? 'Edit material' : 'Add material'} onClose={closeModal}>
           <form className="modal-form" onSubmit={handleMaterialSubmit}>
+            {editingMaterialId ? null : (
             <div className="segmented full modal-tabs" role="group">
               <button
                 type="button"
@@ -3551,6 +3741,7 @@ function App() {
                 Custom
               </button>
             </div>
+            )}
 
             {materialMode === 'predefined' ? (
               <div className="tab-content active modal-tab-content">
@@ -3629,6 +3820,9 @@ function App() {
                       {unit.label}
                     </option>
                   ))}
+                  {materialForm.unit && !materialUnits.some((unit) => unit.value === materialForm.unit) ? (
+                    <option value={materialForm.unit}>{materialForm.unit}</option>
+                  ) : null}
                 </select>
                 {materialErrors.unit ? <p className="input-error">Unit is required</p> : null}
               </div>
@@ -3711,8 +3905,8 @@ function App() {
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={isSaving}>
-                <Icon name="plus" />
-                <span>Add material</span>
+                <Icon name={editingMaterialId ? 'check' : 'plus'} />
+                <span>{editingMaterialId ? 'Save changes' : 'Add material'}</span>
               </button>
             </div>
           </form>
@@ -3870,7 +4064,7 @@ function App() {
       ) : null}
 
       {modal === 'operational-cost' ? (
-        <Modal title="Add operational cost" onClose={closeModal}>
+        <Modal title={editingCostId ? 'Edit operational cost' : 'Add operational cost'} onClose={closeModal}>
           <form className="modal-form" onSubmit={handleOperationalCostSubmit}>
             <div className="form-group">
               <label htmlFor="operational-cost-name-input">What was it for?</label>
@@ -3910,8 +4104,8 @@ function App() {
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={isSaving}>
-                <Icon name="plus" />
-                <span>Add cost</span>
+                <Icon name={editingCostId ? 'check' : 'plus'} />
+                <span>{editingCostId ? 'Save changes' : 'Add cost'}</span>
               </button>
             </div>
           </form>

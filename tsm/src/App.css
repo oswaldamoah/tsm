@@ -660,15 +660,42 @@ textarea.input {
     box-shadow 0.18s;
 }
 
-/* The fibre strand: each site type gets its colour from the fibre code */
+/* The fibre strand: each site type gets its colour from the fibre code.
+   Two columns of tiles in lighter and darker shades of that colour,
+   offset from each other, make a mosaic strip down the card's edge. */
 .site-card::before {
+  --tile-a: var(--strand);
+  --tile-b: color-mix(in srgb, var(--strand) 52%, white);
+  --tile-c: color-mix(in srgb, var(--strand) 68%, black);
+  --tile-d: color-mix(in srgb, var(--strand) 78%, white);
+  --tile-e: color-mix(in srgb, var(--strand) 84%, black);
+  --gap: transparent;
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  width: 4px;
-  background: var(--strand);
+  width: 12px;
+  background:
+    repeating-linear-gradient(180deg,
+      var(--tile-a) 0 26px, var(--gap) 26px 28px,
+      var(--tile-b) 28px 40px, var(--gap) 40px 42px,
+      var(--tile-c) 42px 64px, var(--gap) 64px 66px,
+      var(--tile-d) 66px 80px, var(--gap) 80px 82px,
+      var(--tile-e) 82px 102px, var(--gap) 102px 104px) 0 0 / 3px 100% no-repeat,
+    repeating-linear-gradient(180deg,
+      var(--tile-c) 0 14px, var(--gap) 14px 16px,
+      var(--tile-a) 16px 36px, var(--gap) 36px 38px,
+      var(--tile-d) 38px 54px, var(--gap) 54px 56px,
+      var(--tile-e) 56px 70px, var(--gap) 70px 72px,
+      var(--tile-b) 72px 86px, var(--gap) 86px 88px,
+      var(--tile-a) 88px 102px, var(--gap) 102px 104px) 4px 0 / 3px 100% no-repeat,
+    repeating-linear-gradient(180deg,
+      var(--tile-d) 0 20px, var(--gap) 20px 22px,
+      var(--tile-e) 22px 34px, var(--gap) 34px 36px,
+      var(--tile-a) 36px 58px, var(--gap) 58px 60px,
+      var(--tile-b) 60px 72px, var(--gap) 72px 74px,
+      var(--tile-c) 74px 102px, var(--gap) 102px 104px) 8px 0 / 3px 100% no-repeat;
 }
 
 .site-card:hover {
@@ -693,7 +720,7 @@ textarea.input {
   width: 100%;
   border: 0;
   border-radius: inherit;
-  padding: 1.25rem 1.25rem 1.15rem 1.5rem;
+  padding: 1.25rem 1.25rem 1.15rem 1.9rem;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -919,7 +946,7 @@ textarea.input {
   gap: 1rem;
   border: none;
   border-radius: inherit;
-  padding: 0.85rem 1rem 0.85rem 1.35rem;
+  padding: 0.85rem 1rem 0.85rem 1.75rem;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -2202,3 +2229,125 @@ label {
   margin-right: 0.35rem;
   overflow: visible;
 }
+
+/* ============ MATERIAL DETAILS ============ */
+
+.material-info {
+  min-width: 0;
+}
+
+.material-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.9rem;
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.material-meta strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.dept-pill {
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  background: var(--primary-soft);
+  color: var(--primary-color);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* ============ ACTIVITY DEADLINES ============ */
+
+:root {
+  --overdue: #c62828;
+  --overdue-soft: #fdecea;
+  --overdue-line: #f2b8b5;
+  --due-soon: #9a6700;
+  --due-soon-soft: #fff6d6;
+  --due-soon-line: #f0d27a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --overdue: #ff8a80;
+    --overdue-soft: rgba(255, 99, 88, 0.12);
+    --overdue-line: rgba(255, 99, 88, 0.4);
+    --due-soon: #f5c451;
+    --due-soon-soft: rgba(245, 196, 81, 0.1);
+    --due-soon-line: rgba(245, 196, 81, 0.38);
+  }
+}
+
+:root[data-theme='dark'] {
+  --overdue: #ff8a80;
+  --overdue-soft: rgba(255, 99, 88, 0.12);
+  --overdue-line: rgba(255, 99, 88, 0.4);
+  --due-soon: #f5c451;
+  --due-soon-soft: rgba(245, 196, 81, 0.1);
+  --due-soon-line: rgba(245, 196, 81, 0.38);
+}
+
+.list-item.is-overdue {
+  border-color: var(--overdue-line);
+  background: var(--overdue-soft);
+}
+
+.list-item.is-due-soon {
+  border-color: var(--due-soon-line);
+  background: var(--due-soon-soft);
+}
+
+.list-item.is-overdue .list-item-checkbox {
+  color: var(--overdue);
+}
+
+.list-item.is-due-soon .list-item-checkbox {
+  color: var(--due-soon);
+}
+
+.activity-datetime {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+}
+
+.deadline-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.12rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.deadline-badge.is-overdue {
+  background: var(--overdue);
+  color: #ffffff;
+}
+
+.deadline-badge.is-due-soon {
+  background: var(--due-soon-soft);
+  color: var(--due-soon);
+  box-shadow: inset 0 0 0 1px var(--due-soon-line);
+}
+
+:root[data-theme='dark'] .deadline-badge.is-overdue {
+  color: #2a0b09;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .deadline-badge.is-overdue {
+    color: #2a0b09;
+  }
+}
+
+.badge-inline {
+  margin-left: 0.5rem;
+}
+.site-card-top { flex-wrap: wrap; }

@@ -91,6 +91,9 @@ type Material = {
   quantity: number
   unit: string
   cost: number
+  purchaseDate: string | null
+  requestor: string
+  requestorDepartment: string
 }
 
 type Activity = {
@@ -147,6 +150,9 @@ type RawMaterial = {
   quantity?: unknown
   unit?: unknown
   cost?: unknown
+  purchaseDate?: unknown
+  requestor?: unknown
+  requestorDepartment?: unknown
 }
 
 type RawActivity = {
@@ -203,7 +209,7 @@ type ModalType =
 type SiteModalMode = 'add' | 'edit'
 type MaterialMode = 'predefined' | 'custom'
 type ActivityMode = 'predefined' | 'custom'
-type MaterialErrors = Partial<Record<'material' | 'customName' | 'quantity' | 'unit' | 'cost', boolean>>
+type MaterialErrors = Partial<Record<'material' | 'customName' | 'quantity' | 'unit' | 'cost' | 'purchaseDate', boolean>>
 type ActivityErrors = Partial<Record<'activity' | 'customName', boolean>>
 type OperationalCostErrors = Partial<Record<'name' | 'amount', boolean>>
 type CompanySettingsErrors = Partial<Record<'name' | 'email', boolean>>
@@ -295,6 +301,51 @@ const emptyMaterialForm = {
   quantity: '1',
   unit: 'pcs',
   cost: '0',
+  purchaseDate: '',
+  requestor: '',
+  requestorDepartment: '',
+}
+
+// Suggestions only: the department field accepts any text.
+const departmentSuggestions = ['Engineering', 'Operations', 'Procurement', 'Logistics', 'Finance', 'Field Services', 'Projects']
+
+// ---- Activity deadlines ----
+const DUE_SOON_MS = 48 * 60 * 60 * 1000
+
+type DeadlineState = 'overdue' | 'due-soon' | null
+
+function activityDeadline(activity: Activity, now: number): DeadlineState {
+  if (activity.completed || activity.isArchived || !activity.endDatetime) return null
+  const due = new Date(activity.endDatetime).getTime()
+  if (Number.isNaN(due)) return null
+  if (due < now) return 'overdue'
+  if (due - now <= DUE_SOON_MS) return 'due-soon'
+  return null
+}
+
+function relativeDuration(ms: number): string {
+  const minutes = Math.round(Math.abs(ms) / 60000)
+  if (minutes < 60) return `${Math.max(minutes, 1)} min`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'}`
+  const days = Math.round(hours / 24)
+  return `${days} day${days === 1 ? '' : 's'}`
+}
+
+function deadlineLabel(activity: Activity, state: DeadlineState, now: number): string | null {
+  if (!state || !activity.endDatetime) return null
+  const diff = new Date(activity.endDatetime).getTime() - now
+  return state === 'overdue' ? `Overdue by ${relativeDuration(diff)}` : `Due in ${relativeDuration(diff)}`
+}
+
+// Re-render once a minute so "due soon" turns "overdue" without a refresh.
+function useNow(intervalMs = 60000) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return now
 }
 
 const emptyActivityForm = {
@@ -346,6 +397,9 @@ function normalizeMaterial(raw: RawMaterial): Material {
     quantity: numberValue(raw.quantity),
     unit: textValue(raw.unit, 'pcs'),
     cost: numberValue(raw.cost),
+    purchaseDate: nullableText(raw.purchaseDate),
+    requestor: textValue(raw.requestor),
+    requestorDepartment: textValue(raw.requestorDepartment),
   }
 }
 
@@ -1090,6 +1144,15 @@ function SiteCard({
 }) {
   const totals = calculateSiteTotals(site)
   const createdLabel = formatDate(site.createdAt)
+  const now = useNow()
+  const overdueCount = site.activities.filter((activity) => activityDeadline(activity, now) === 'overdue').length
+  const dueSoonCount = site.activities.filter((activity) => activityDeadline(activity, now) === 'due-soon').length
+  const deadlineBadges = (
+    <>
+      {overdueCount ? <span className="deadline-badge is-overdue">{overdueCount} overdue</span> : null}
+      {dueSoonCount ? <span className="deadline-badge is-due-soon">{dueSoonCount} due soon</span> : null}
+    </>
+  )
   const longPressHandlers = useLongPress(() => onLongPress?.(site.id))
   const pressHandlers = !selectMode && onLongPress ? longPressHandlers : {}
   const handleClick = () => (selectMode ? onToggleSelect?.(site.id) : onView(site.id))
@@ -1137,6 +1200,7 @@ function SiteCard({
               <h3 className="site-name">{site.name}</h3>
               {typeBadge}
               {archivedBadge}
+              {deadlineBadges}
             </div>
             <p className="site-meta-line">
               {[...metaParts, createdLabel ? `Created ${createdLabel}` : null].filter(Boolean).join(', ') ||
@@ -1160,6 +1224,7 @@ function SiteCard({
         <div className="site-card-top">
           {typeBadge ?? <span className="badge badge-archived">No type</span>}
           {archivedBadge}
+          {deadlineBadges}
         </div>
         <div className="site-heading">
           <h3 className="site-name">{site.name}</h3>
@@ -1231,9 +1296,12 @@ function ActivityListItem({
   const rangeLabel = formatActivityRange(activity.startDatetime, activity.endDatetime)
   const longPressHandlers = useLongPress(() => onLongPress(activity.id))
   const pressHandlers = !selectMode ? longPressHandlers : {}
+  const now = useNow()
+  const deadline = activityDeadline(activity, now)
+  const deadlineText = deadlineLabel(activity, deadline, now)
 
   return (
-    <div className="list-item">
+    <div className={`list-item${deadline ? ` is-${deadline}` : ''}`}>
       <div className="list-item-content" {...pressHandlers}>
         {selectMode ? (
           <input
@@ -1258,10 +1326,15 @@ function ActivityListItem({
           <h4 className={`list-item-title ${activity.completed ? 'completed' : ''}`}>
             {activity.name}
             {activity.isArchived ? (
-              <span className="badge badge-archived" style={{ marginLeft: '0.5rem' }}>Archived</span>
+              <span className="badge badge-archived badge-inline">Archived</span>
             ) : null}
           </h4>
-          {rangeLabel ? <p className="activity-datetime">{rangeLabel}</p> : null}
+          {rangeLabel || deadlineText ? (
+            <p className="activity-datetime">
+              {deadlineText ? <span className={`deadline-badge is-${deadline}`}>{deadlineText}</span> : null}
+              {rangeLabel ? <span>{rangeLabel}</span> : null}
+            </p>
+          ) : null}
         </div>
       </div>
       <div className="list-item-actions">
@@ -1691,7 +1764,7 @@ function App() {
 
   function openMaterialModal() {
     setMaterialMode('predefined')
-    setMaterialForm(emptyMaterialForm)
+    setMaterialForm({ ...emptyMaterialForm, purchaseDate: todayDateInputValue() })
     setMaterialErrors({})
     setModal('material')
   }
@@ -1958,6 +2031,7 @@ function App() {
     if (!Number.isFinite(quantity) || quantity <= 0) nextErrors.quantity = true
     if (!materialForm.unit) nextErrors.unit = true
     if (!Number.isFinite(cost) || cost < 0) nextErrors.cost = true
+    if (!materialForm.purchaseDate) nextErrors.purchaseDate = true
 
     setMaterialErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
@@ -1968,6 +2042,9 @@ function App() {
       quantity,
       unit: materialForm.unit,
       cost,
+      purchaseDate: dateInputToIso(materialForm.purchaseDate) ?? null,
+      requestor: materialForm.requestor.trim(),
+      requestorDepartment: materialForm.requestorDepartment.trim(),
     }
 
     setIsSaving(true)
@@ -3077,12 +3154,25 @@ function App() {
                         icon="building"
                       />
                     ) : (
-                      selectedSite.materials.map((material) => (
+                      [...selectedSite.materials]
+                        .sort((a, b) => (b.purchaseDate ?? '').localeCompare(a.purchaseDate ?? ''))
+                        .map((material) => (
                         <div className="list-item" key={material.id}>
-                          <div>
+                          <div className="material-info">
                             <h4 className="list-item-title">{material.name}</h4>
-                            <p className="list-item-subtitle">
-                              {material.quantity} {material.unit}
+                            <p className="material-meta">
+                              <span>
+                                {material.quantity} {material.unit}
+                              </span>
+                              {material.purchaseDate ? <span>Bought {formatDate(material.purchaseDate)}</span> : null}
+                              {material.requestor ? (
+                                <span>
+                                  Requested by <strong>{material.requestor}</strong>
+                                </span>
+                              ) : null}
+                              {material.requestorDepartment ? (
+                                <span className="dept-pill">{material.requestorDepartment}</span>
+                              ) : null}
                             </p>
                           </div>
                           <div className="list-item-actions">
@@ -3544,21 +3634,76 @@ function App() {
               </div>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="material-cost-input">Cost (GHS)</label>
-              <input
-                type="number"
-                id="material-cost-input"
-                className="input"
-                min="0"
-                step="0.01"
-                value={materialForm.cost}
-                onChange={(event) => {
-                  setMaterialForm((form) => ({ ...form, cost: event.target.value }))
-                  setMaterialErrors((errors) => ({ ...errors, cost: false }))
-                }}
-              />
-              {materialErrors.cost ? <p className="input-error">Cost must be a valid non-negative number</p> : null}
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="material-cost-input">Cost (GHS)</label>
+                <input
+                  type="number"
+                  id="material-cost-input"
+                  className="input"
+                  min="0"
+                  step="0.01"
+                  value={materialForm.cost}
+                  onChange={(event) => {
+                    setMaterialForm((form) => ({ ...form, cost: event.target.value }))
+                    setMaterialErrors((errors) => ({ ...errors, cost: false }))
+                  }}
+                />
+                {materialErrors.cost ? <p className="input-error">Cost must be a valid non-negative number</p> : null}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="material-date-input">Date purchased</label>
+                <input
+                  type="date"
+                  id="material-date-input"
+                  className={`input${materialErrors.purchaseDate ? ' invalid' : ''}`}
+                  max={todayDateInputValue()}
+                  value={materialForm.purchaseDate}
+                  onChange={(event) => {
+                    setMaterialForm((form) => ({ ...form, purchaseDate: event.target.value }))
+                    setMaterialErrors((errors) => ({ ...errors, purchaseDate: false }))
+                  }}
+                />
+                {materialErrors.purchaseDate ? <p className="input-error">Pick the day it was bought</p> : null}
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="material-requestor-input">Requested by</label>
+                <input
+                  type="text"
+                  id="material-requestor-input"
+                  className="input"
+                  placeholder="e.g. Kwame Mensah"
+                  autoComplete="name"
+                  maxLength={255}
+                  value={materialForm.requestor}
+                  onChange={(event) => setMaterialForm((form) => ({ ...form, requestor: event.target.value }))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="material-department-input">Department</label>
+                <input
+                  type="text"
+                  id="material-department-input"
+                  className="input"
+                  placeholder="e.g. Engineering"
+                  list="material-department-options"
+                  maxLength={255}
+                  value={materialForm.requestorDepartment}
+                  onChange={(event) =>
+                    setMaterialForm((form) => ({ ...form, requestorDepartment: event.target.value }))
+                  }
+                />
+                <datalist id="material-department-options">
+                  {departmentSuggestions.map((department) => (
+                    <option key={department} value={department} />
+                  ))}
+                </datalist>
+              </div>
             </div>
 
             <div className="modal-footer">

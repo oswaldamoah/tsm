@@ -3335,7 +3335,6 @@ function App() {
                               <span>
                                 {material.quantity} {material.unit}
                               </span>
-                              {material.purchaseDate ? <span>Bought {formatDate(material.purchaseDate)}</span> : null}
                               {material.requestor ? (
                                 <span>
                                   Requested by <strong>{material.requestor}</strong>
@@ -3347,7 +3346,12 @@ function App() {
                             </p>
                           </div>
                           <div className="list-item-actions">
-                            <span className="cost-value">{formatCurrency(material.cost)}</span>
+                            <div className="cost-stack">
+                              <span className="cost-value">{formatCurrency(material.cost)}</span>
+                              <span className={`cost-date${material.purchaseDate ? '' : ' is-missing'}`}>
+                                {material.purchaseDate ? formatDate(material.purchaseDate) : 'No purchase date'}
+                              </span>
+                            </div>
                             <button
                               type="button"
                               className="btn btn-icon"

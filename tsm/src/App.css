@@ -2408,3 +2408,29 @@ label {
     flex: 1;
   }
 }
+
+/* Cost with its purchase date underneath */
+.cost-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  margin-right: 0.35rem;
+  text-align: right;
+}
+
+.cost-stack .cost-value {
+  margin-right: 0;
+}
+
+.cost-date {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cost-date.is-missing {
+  color: var(--text-light);
+  font-style: italic;
+}
